@@ -51,6 +51,11 @@ function render(keepScroll = false) {
   const root = document.getElementById('view');
   root._unbind?.();
   root._unbind = null;
+  // Play the page entrance only when navigating, not on background refreshes.
+  // The class comes off again so in-place redraws (ticking a set) stay still.
+  clearTimeout(root._enterT);
+  root.classList.toggle('enter', keepScroll !== true);
+  root._enterT = setTimeout(() => root.classList.remove('enter'), 900);
   if (gate(root)) { nav(''); return; }
   if (cloudEnabled && path === '/') { const m = me(); location.hash = m.role === 'coach' ? '#/coach' : `#/athlete/${m.athleteId}`; return; }
   if (!me() && path !== '/') { location.hash = '#/'; return; }
