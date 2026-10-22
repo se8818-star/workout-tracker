@@ -258,6 +258,9 @@ textarea { resize: vertical; }
 .seg button { font: 600 0.62rem var(--mono); text-transform: uppercase; padding: 7px 12px; min-height: 34px; border: 0; background: #fff; color: var(--ink); cursor: pointer; }
 .seg button + button { border-left: var(--thin); }
 .seg button.on { background: var(--ink); color: var(--paper); }
+.unit-seg { margin-top: 0; text-transform: none; }
+.unit-seg button { text-transform: none; padding: 6px 10px; min-height: 32px; }
+.warm-load { width: auto; min-width: 190px; min-height: 34px; padding: 4px 8px; font: 600 0.72rem var(--mono); }
 .item-none { margin: 10px 0 4px; }
 .sec { margin-top: 14px; }
 .sec h4 {

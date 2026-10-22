@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, scheduledOn, tagPctOfMax } from './calc.js';
+import { buildSession, scheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -55,6 +55,13 @@ export function onChange(fn) { listeners.add(fn); return () => listeners.delete(
 
 export const settings = () => db.settings;
 export function setSetting(k, v) { db.settings[k] = v; save(); }
+
+// Weight helpers for this device's unit. Stored weights are always pounds.
+export const unit = () => db.settings.units || 'lb';
+export const showW = (lb) => { const v = toUnit(lb, unit()); return v == null ? null : Math.round(v * 10) / 10; };
+export const readW = (v) => fromUnit(v, unit());
+// The rounding step in pounds, so prescribed weights land on whole kg plates on a kg device.
+export const roundStep = () => (unit() === 'kg' ? (db.settings.roundingKg ?? 2.5) * LB_PER_KG : db.settings.rounding);
 
 export function all(kind) { return Object.values(db[kind]); }
 export function get(kind, id) { return db[kind][id] || null; }
@@ -126,7 +133,7 @@ export function startLog(athleteId, iso, plan) {
   const existing = logFor(athleteId, iso);
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
-  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, db.settings.rounding);
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep());
   return put('logs', {
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,

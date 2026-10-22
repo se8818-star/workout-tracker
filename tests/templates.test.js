@@ -22,16 +22,15 @@ test('Fall 2026 builds a session with RIR mapped to RPE and notes kept', () => {
   assert.match(fly.note, /Reps 10-12 · RIR 1\/0 · Rest 3-5 min/);
 });
 
-test('Fall 2026 days open with a warmup section that is left out of training totals', () => {
-  const t = TEMPLATES.find((x) => x.id === 'fall-2026');
-  for (const d of t.block.days) {
-    const firstMain = d.items.findIndex((x) => !x.warmup);
-    assert.ok(firstMain > 0);
-    assert.ok(d.items.slice(firstMain).every((x) => !x.warmup), 'warmup items come first');
-  }
+test('the Fall 2026 warmup is its own template, left out of training totals', () => {
+  const prog = TEMPLATES.find((x) => x.id === 'fall-2026');
+  assert.ok(prog.block.days.every((d) => d.items.every((x) => !x.warmup)), 'program has no built-in warmup');
+  const t = TEMPLATES.find((x) => x.id === 'fall-2026-warmup');
+  assert.equal(t.kind, 'warmup');
+  assert.equal(t.block.days.length, 1);
+  assert.equal(t.block.days[0].items.length, 12);
+  assert.ok(t.block.days[0].items.every((x) => x.warmup));
   const ex = Object.fromEntries(t.exercises.map((e) => [e.id, e]));
   const s = buildSession(t.block, 0, 0, { maxes: {} });
-  const warm = s.items.filter((x) => x.warmup).reduce((n, x) => n + x.sets.length, 0);
-  const all = s.items.reduce((n, x) => n + x.sets.length, 0);
-  assert.equal(sessionTotals(s, ex, false).sets, all - warm);
+  assert.equal(sessionTotals(s, ex, false).sets, 0);
 });

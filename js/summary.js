@@ -14,7 +14,7 @@ export function weekSummary(athleteId, monday) {
     const iso = addDays(monday, i);
     const plans = store.plannedOn(athleteId, iso);
     for (const p of plans) {
-      const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.settings().rounding);
+      const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.roundStep());
       s.items = s.items.map((it) => tagPctOfMax(it, athlete, ex));
       planned = addTotals(planned, sessionTotals(s, ex, false));
       sessionsPlanned++;

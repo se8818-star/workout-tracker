@@ -98,7 +98,8 @@ function settingsView(root) {
     ${me()?.role === 'coach' ? `<section class="card">${teamInfo() ? `<p>Team <b>${esc(teamInfo().team?.name)}</b>. Athletes join with code <b class="code">${esc(teamInfo().team?.join_code)}</b></p>` : ''}<a class="btn wide" href="#/coach/assign">Assign a program</a></section>` : ''}
     <section class="card form">
       <label class="field-row"><span>Units</span><select data-action="units"><option ${s.units === 'lb' ? 'selected' : ''}>lb</option><option ${s.units === 'kg' ? 'selected' : ''}>kg</option></select></label>
-      <label class="field-row"><span>Round weights to</span><input type="number" step="0.5" min="0" value="${s.rounding}" data-action="rounding"></label>
+      <label class="field-row"><span>Round weights to (${s.units})</span><input type="number" step="0.5" min="0" value="${s.units === 'kg' ? (s.roundingKg ?? 2.5) : s.rounding}" data-action="rounding"></label>
+      <p class="muted small">Weights are saved once and shown in each person's unit, so a coach in kg and an athlete in lb see the same load.</p>
     </section>
     <section class="card">
       <h3>Put it on your phone</h3>
@@ -110,8 +111,8 @@ function settingsView(root) {
       ${cloudEnabled ? '' : '<button class="btn ghost wide danger" data-action="reset">Reset demo data</button>'}
     </section>`;
   bindActions(root, {
-    units: (el) => store.setSetting('units', el.value),
-    rounding: (el) => store.setSetting('rounding', Number(el.value) || 0),
+    units: (el) => { store.setSetting('units', el.value); settingsView(root); },
+    rounding: (el) => store.setSetting(s.units === 'kg' ? 'roundingKg' : 'rounding', Number(el.value) || 0),
     switchUser: () => { if (cloudEnabled) return signout(); store.setSetting('me', null); location.hash = '#/'; },
     export: () => {
       const data = Object.fromEntries(store.KINDS.map((k) => [k, store.all(k)]));

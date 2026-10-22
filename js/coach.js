@@ -1,9 +1,9 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 
@@ -15,7 +15,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function board(root, _p, query) {
   const mon = weekStart(query.get('d') || today());
   const athletes = store.all('athletes').sort((a, b) => (a.group || '').localeCompare(b.group || '') || a.name.localeCompare(b.name));
-  const u = store.settings().units;
+  const u = store.unit();
   let team = { tonnage: 0, contacts: 0, done: 0, planned: 0 };
   const rows = athletes.map((a) => {
     const w = weekSummary(a.id, mon);
@@ -28,7 +28,7 @@ export function board(root, _p, query) {
     return `<tr>
       <td><a href="#/coach/athlete/${a.id}"><b>${esc(a.name)}</b></a><br><small class="muted">${esc(a.group || '')}</small></td>
       <td>${w.sessionsDone}/${w.sessionsPlanned} ${flag}</td>
-      <td>${fmt(w.done.tonnage)}</td>
+      <td>${fmt(store.showW(w.done.tonnage))}</td>
       <td>${fmt(w.done.contacts)}</td>
       <td>${fmt(w.load)}</td>
       <td class="note-cell">${noteTxt ? `“${esc(noteTxt)}”<br><small class="muted">${fmtDate(lastNote.date, { month: 'short', day: 'numeric' })}</small>` : ''}</td>
@@ -39,7 +39,7 @@ export function board(root, _p, query) {
       <div class="row gap"><a class="chip" href="#/coach?d=${addDays(mon, -7)}">‹ Prev</a><span class="muted">${fmtDate(mon, { month: 'short', day: 'numeric' })}</span><a class="chip" href="#/coach?d=${addDays(mon, 7)}">Next ›</a></div></header>
     <div class="stats">
       ${stat('Sessions done', team.done, null, ` / ${team.planned}`)}
-      ${stat('Team tonnage', team.tonnage, null, ` ${u}`)}
+      ${stat('Team tonnage', store.showW(team.tonnage), null, ` ${u}`)}
       ${stat('Team plyo contacts', team.contacts)}
     </div>
     <div class="card scroll-x"><table class="tbl board">
@@ -66,7 +66,7 @@ export function athlete(root, { id }) {
   const a = store.get('athletes', id);
   if (!a) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const ex = store.exercisesById();
-  const u = store.settings().units;
+  const u = store.unit();
   const w = weekSummary(id, weekStart(today()));
   const logs = store.logsFor(id).filter((l) => l.finished).reverse().slice(0, 12);
   const loaded = store.all('exercises').filter((x) => x.loaded).sort((x, y) => x.name.localeCompare(y.name));
@@ -76,7 +76,7 @@ export function athlete(root, { id }) {
       <div class="row gap"><a class="chip" href="#/athlete/${id}">Open athlete view</a><a class="chip" href="#/athlete/${id}/week">Weekly numbers</a></div></header>
     <div class="stats">
       ${stat('Sessions', w.sessionsDone, null, ` / ${w.sessionsPlanned}`)}
-      ${stat('Tonnage', w.done.tonnage, null, ` ${u}`)}
+      ${stat('Tonnage', store.showW(w.done.tonnage), null, ` ${u}`)}
       ${stat('Plyo contacts', w.done.contacts)}
       ${stat('Session load', w.load, null, ' AU')}
     </div>
@@ -84,9 +84,9 @@ export function athlete(root, { id }) {
       ${asg.map((g) => { const b = store.get('blocks', g.blockId); return `<div class="row between"><span><b>${esc(b?.name || '?')}</b><br><small class="muted">from ${fmtDate(g.startDate)} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
       <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program</a>
     </section>
-    <section class="card"><h3>Maxes (${u})</h3>
+    <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
       <p class="muted small">Prescribed weights come from these. They also update when a logged set beats them.</p>
-      <div class="max-grid">${Object.entries(a.maxes || {}).map(([k, v]) => `<label class="field-row"><span>${esc(ex[k]?.name || k)}</span><input type="number" inputmode="decimal" value="${v}" data-action="setMax" data-ex="${k}"></label>`).join('')}</div>
+      <div class="max-grid">${Object.entries(a.maxes || {}).map(([k, v]) => `<label class="field-row"><span>${esc(ex[k]?.name || k)}</span><input type="number" inputmode="decimal" step="any" value="${store.showW(v)}" data-action="setMax" data-ex="${k}"></label>`).join('')}</div>
       <div class="row gap"><select data-action="noop" id="new-max-ex" aria-label="Exercise">${loaded.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
         <input type="number" id="new-max-val" placeholder="Max" inputmode="decimal" aria-label="Max"><button class="chip" data-action="addMax">Add</button></div>
     </section>
@@ -96,18 +96,19 @@ export function athlete(root, { id }) {
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
         return `<div class="log-item"><div class="row between"><b>${esc(l.name)}</b><span class="muted">${fmtDate(l.date)}</span></div>
-          <p class="muted small">RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(t.tonnage)} ${u} · ${fmt(t.contacts)} contacts${l.switchedFrom ? ' · switched day' : ''}</p>
+          <p class="muted small">RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u} · ${fmt(t.contacts)} contacts${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
           ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}</div>`;
       }).join('') || '<p class="muted">Nothing logged yet.</p>'}
     </section>`;
   bindActions(root, {
-    setMax: (el) => { a.maxes[el.dataset.ex] = Number(el.value); store.put('athletes', a); toast('Max saved'); },
+    setMax: (el) => { a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved'); },
+    setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
     addMax: () => {
       const exId = $('#new-max-ex', root).value, v = Number($('#new-max-val', root).value);
       if (!v) return;
-      a.maxes = { ...a.maxes, [exId]: v }; store.put('athletes', a); athlete(root, { id });
+      a.maxes = { ...a.maxes, [exId]: store.readW(v) }; store.put('athletes', a); athlete(root, { id });
     },
     unassign: (el) => { if (confirm('Remove this program from the athlete? Logged sessions stay.')) { store.del('assignments', el.dataset.id); athlete(root, { id }); } },
   });
@@ -115,23 +116,38 @@ export function athlete(root, { id }) {
 
 // ---------- blocks ----------
 
+// Saved warmups live with the blocks (kind 'warmup', one day) so they sync the
+// same way, but they are never assigned; a coach loads them into program days.
+const isWarmup = (b) => b.kind === 'warmup';
+
 export function blocks(root) {
-  const list = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
+  const all = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
+  const row = (b, sub) => `<div class="card row between">
+      <a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${sub}</small></a>
+      <div class="row gap"><button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`;
+  const tpl = (t) => `<div class="card row between">
+        <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
+        <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`;
   root.innerHTML = `
     <header class="page-head"><h1>Programs and blocks</h1><p class="muted">Build a block once, then assign it to anyone.</p></header>
-    ${list.map((b) => `<div class="card row between">
-      <a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}</small></a>
-      <div class="row gap"><button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`).join('')}
+    ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('')}
     <button class="btn" data-action="new">+ New block</button>
+    <h2 class="sec-head">Warmups</h2>
+    <p class="muted">Saved warmups. Load one into any program day from that day's Warmup section.</p>
+    ${all.filter(isWarmup).map((b) => row(b, `${b.days[0]?.items.length || 0} exercises`)).join('')}
+    <button class="btn ghost" data-action="newWarmup">+ New warmup</button>
     <section class="templates">
       <h3>Start from a template</h3>
-      ${TEMPLATES.map((t) => `<div class="card row between">
-        <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
-        <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`).join('')}
+      ${TEMPLATES.filter((t) => !t.kind).map(tpl).join('')}
+      ${TEMPLATES.filter((t) => t.kind === 'warmup').map(tpl).join('')}
     </section>`;
   bindActions(root, {
     new: () => {
       const b = store.put('blocks', { id: store.uid('block'), name: 'New block', weeks: 4, deloadWeek: null, days: [{ name: 'Day 1', items: [] }] });
+      location.hash = `#/coach/block/${b.id}`;
+    },
+    newWarmup: () => {
+      const b = store.put('blocks', { id: store.uid('block'), kind: 'warmup', name: 'New warmup', weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items: [] }] });
       location.hash = `#/coach/block/${b.id}`;
     },
     // Copies the template into this team's programs, adding any exercises
@@ -150,7 +166,8 @@ export function blocks(root) {
     },
     del: (el) => {
       const used = store.all('assignments').some((a) => a.blockId === el.dataset.id);
-      if (!confirm(used ? 'This block is assigned to athletes. Delete it anyway?' : 'Delete this block?')) return;
+      const warm = isWarmup(store.get('blocks', el.dataset.id) || {});
+      if (!confirm(warm ? 'Delete this warmup? Programs that already loaded it keep their copy.' : used ? 'This block is assigned to athletes. Delete it anyway?' : 'Delete this block?')) return;
       store.del('blocks', el.dataset.id); blocks(root);
     },
   });
@@ -174,7 +191,7 @@ function stepper(label, k, value, min, step = 1) {
     <button class="step-btn" data-action="step" data-k="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
 }
 
-const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['none', 'No sets']];
+const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['breaths', 'Breaths'], ['none', 'No sets']];
 
 function itemRow(item, di, ii, ex, label) {
   const x = ex[item.exerciseId];
@@ -199,13 +216,13 @@ function itemRow(item, di, ii, ex, label) {
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', item.sets, 1)}
       <span class="times" aria-hidden="true">×</span>
-      ${measure === 'time' ? stepper('Seconds', 'secs', item.secs, 0, 5) : stepper('Reps', 'reps', item.reps, 0)}
+      ${measure === 'time' ? stepper('Seconds', 'secs', item.secs, 0, 5) : stepper(measure === 'breaths' ? 'Breaths' : 'Reps', 'reps', item.reps, 0)}
     </div>`}
-    ${x?.loaded && measure !== 'none' ? `<div class="item-fields">
+    ${x?.loaded && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
       <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
       ${loadType === 'pct' ? `<label>%<input type="number" step="0.5" value="${item.pct}" data-action="itemField" data-k="pct"></label>
         <label>Max from<select data-action="itemField" data-k="maxFrom"><option value="">${esc(x.name)}</option>${loadedEx.filter((e) => e.id !== item.exerciseId).map((e) => `<option value="${e.id}" ${item.maxFrom === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : ''}
-      ${loadType === 'weight' ? `<label>${store.settings().units}<input type="number" step="any" value="${item.weight}" data-action="itemField" data-k="weight"></label>` : ''}
+      ${loadType === 'weight' ? `<label>${store.unit()}<input type="number" step="any" value="${store.showW(item.weight)}" data-action="itemField" data-k="weight"></label>` : ''}
     </div>` : ''}
     <div class="item-notes">
       <label>Tempo<input type="text" placeholder="e.g. 3-1-1-0" value="${esc(item.tempo || '')}" data-action="itemField" data-k="tempo"></label>
@@ -218,9 +235,9 @@ function itemRow(item, di, ii, ex, label) {
           <option value="none" ${prog.type === 'none' ? 'selected' : ''}>Same</option>
           ${x?.loaded ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
           <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
-          ${measure === 'reps' ? `<option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ reps</option>` : ''}
+          ${isCount(measure) ? `<option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ ${measure === 'breaths' ? 'breaths' : 'reps'}</option>` : ''}
           ${measure === 'time' ? `<option value="add_secs" ${prog.type === 'add_secs' ? 'selected' : ''}>+ seconds</option>` : ''}</select></label>
-        ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${prog.step ?? ''}" data-action="progStep"></label>` : ''}
+        ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${(prog.type === 'add_weight' ? store.showW(prog.step) : prog.step) ?? ''}" data-action="progStep"></label>` : ''}
         <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
       </div>
     </details>
@@ -251,6 +268,8 @@ export function blockEditor(root, { id }, query) {
   const day = Math.min(Number(query.get('day') || 0), Math.max(0, b.days.length - 1));
   let other = query.get('with') === null || query.get('with') === '' ? null : Number(query.get('with'));
   if (other === day || other >= b.days.length) other = null;
+  const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
+  const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('');
   const dayCard = (di) => {
     const d = b.days[di];
     return `
@@ -265,10 +284,12 @@ export function blockEditor(root, { id }, query) {
         <p class="muted small day-tot" data-di="${di}">${dayLine(dayTots[di])}</p>
         <div class="sec warm-sec">
           <h4>Warmup</h4>
-          ${d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('')}
+          ${warmItems(d, di)}
           <div class="row gap wrap">
             <button class="chip" data-action="itemAdd" data-di="${di}" data-warm="1">+ Warmup exercise</button>
+            ${warmups.length ? `<select class="warm-load" data-action="warmLoad" data-di="${di}" aria-label="Load a saved warmup"><option value="">Load a saved warmup…</option>${warmups.map((w) => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select>` : ''}
             ${d.items.some((x) => x.warmup) && b.days.length > 1 ? `<button class="chip" data-action="warmCopy" data-di="${di}">Copy warmup to other days</button>` : ''}
+            ${d.items.some((x) => x.warmup) ? `<button class="chip" data-action="warmSave" data-di="${di}">Save as a warmup</button>` : ''}
           </div>
         </div>
         <div class="sec">
@@ -285,13 +306,21 @@ export function blockEditor(root, { id }, query) {
       </section>`;
   };
 
-  root.innerHTML = `
+  root.innerHTML = isWarmup(b) ? `
+    <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
+      <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Warmup name"></header>
+    <p class="muted small">A saved warmup. Load it into a program day from that day's Warmup section. Changing it here doesn't change programs that already loaded it.</p>
+    <section class="card day-card" data-di="0"><div class="sec warm-sec">
+      ${warmItems(b.days[0], 0)}
+      <button class="chip" data-action="itemAdd" data-di="0" data-warm="1">+ Warmup exercise</button>
+    </div></section>` : `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Block name"></header>
     <section class="card row gap wrap">
       <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
       <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
       <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
+      <div class="field-row"><span>Weights in</span>${unitSeg(store.unit())}</div>
     </section>
     <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
     <nav class="day-tabs" aria-label="Days">
@@ -307,7 +336,7 @@ export function blockEditor(root, { id }, query) {
   // swallow the next tap. Structural changes (add/move/remove) redraw, keeping focus.
   const refreshTotals = () => {
     const t = totals();
-    $('#week-tot', root).innerHTML = weekLine(t.wk);
+    const wt = $('#week-tot', root); if (wt) wt.innerHTML = weekLine(t.wk);
     root.querySelectorAll('.day-tot').forEach((el) => { el.textContent = dayLine(t.days[el.dataset.di]); });
   };
   const save = (rerender = true) => {
@@ -355,6 +384,7 @@ export function blockEditor(root, { id }, query) {
       const k = el.dataset.k;
       const it = b.days[di].items[ii];
       if (['note', 'tempo', 'group', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
+      else if (k === 'weight') it[k] = store.readW(num(el.value));
       else it[k] = num(el.value);
       save(false);
     },
@@ -363,10 +393,11 @@ export function blockEditor(root, { id }, query) {
       const it = b.days[di].items[ii];
       delete it.pct; delete it.weight;
       if (el.value === 'pct') it.pct = 70;
-      if (el.value === 'weight') it.weight = 45;
+      const kg = store.unit() === 'kg';
+      if (el.value === 'weight') it.weight = kg ? store.readW(20) : 45;
       // Keep the weekly rule meaningful for the new load type.
       const pt = it.progression?.type;
-      if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: 5 };
+      if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: kg ? store.readW(2.5) : 5 };
       if (el.value === 'pct' && pt === 'add_weight') it.progression = { type: 'add_pct', step: 2.5 };
       if (el.value === 'none' && (pt === 'add_pct' || pt === 'add_weight')) it.progression = undefined;
       save();
@@ -374,11 +405,16 @@ export function blockEditor(root, { id }, query) {
     progType: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
-      const defaults = { add_pct: 2.5, add_weight: 5, add_reps: 1, add_secs: 5 };
+      const defaults = { add_pct: 2.5, add_weight: store.unit() === 'kg' ? store.readW(2.5) : 5, add_reps: 1, add_secs: 5 };
       it.progression = el.value === 'none' ? undefined : { type: el.value, step: defaults[el.value] };
       save();
     },
-    progStep: (el) => { const { di, ii } = itemOf(el); b.days[di].items[ii].progression.step = num(el.value); save(false); },
+    progStep: (el) => {
+      const { di, ii } = itemOf(el);
+      const prog = b.days[di].items[ii].progression;
+      prog.step = prog.type === 'add_weight' ? store.readW(num(el.value)) : num(el.value);
+      save(false);
+    },
     step: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
@@ -394,10 +430,14 @@ export function blockEditor(root, { id }, query) {
       const v = el.dataset.v;
       if (v === 'reps') delete it.measure; else it.measure = v;
       if (v === 'time' && it.secs == null) it.secs = 30;
-      if (v !== 'reps' && it.reps == null) delete it.reps;
+      if (v === 'breaths' && it.reps == null) it.reps = 5;
+      if (!isCount(v) && it.reps == null) delete it.reps;
+      // Breathing drills carry no load.
+      if (v === 'breaths') { delete it.pct; delete it.weight; delete it.maxFrom; }
       // A weekly rule only makes sense for the measure it was written for.
       const pt = it.progression?.type;
-      if ((pt === 'add_reps' && v !== 'reps') || (pt === 'add_secs' && v !== 'time') || v === 'none') it.progression = undefined;
+      if ((pt === 'add_reps' && !isCount(v)) || (pt === 'add_secs' && v !== 'time') || v === 'none'
+        || (v === 'breaths' && ['add_pct', 'add_weight'].includes(pt))) it.progression = undefined;
       save();
     },
     itemPick: (el) => {
@@ -424,6 +464,27 @@ export function blockEditor(root, { id }, query) {
         root.querySelector(`.item[data-di="${di}"][data-ii="${at}"]`)?.scrollIntoView({ block: 'center' });
       }, { allowNew: true });
     },
+    setUnits: (el) => { store.setSetting('units', el.dataset.v); save(); },
+    warmLoad: (el) => {
+      const di = Number(el.dataset.di);
+      const w = store.get('blocks', el.value);
+      if (!w) return;
+      const hasWarm = (d) => d.items.some((x) => x.warmup);
+      if (hasWarm(b.days[di]) && !confirm(`Replace this day's warmup with "${w.name}"?`)) { el.value = ''; return; }
+      const load = (d) => { d.items = [...w.days[0].items.map((x) => ({ ...structuredClone(x), warmup: true })), ...d.items.filter((x) => !x.warmup)]; };
+      load(b.days[di]);
+      if (b.days.length > 1 && confirm(`Use "${w.name}" on the other ${b.days.length - 1} day(s) too?`)) b.days.forEach(load);
+      save();
+      toast(`Loaded "${w.name}"`);
+    },
+    warmSave: (el) => {
+      const name = prompt('Name this warmup', `${b.name} warmup`);
+      if (!name) return;
+      const items = structuredClone(b.days[el.dataset.di].items.filter((x) => x.warmup));
+      store.put('blocks', { id: store.uid('block'), kind: 'warmup', name: name.trim(), weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items }] });
+      save();
+      toast(`Saved "${name.trim()}" to your warmups`);
+    },
     warmCopy: (el) => {
       const di = Number(el.dataset.di);
       const warm = b.days[di].items.filter((x) => x.warmup);
@@ -449,7 +510,10 @@ export function blockEditor(root, { id }, query) {
           toast(`Added "${q.name}" to the library. Set its movement type there.`);
         }
         const item = { exerciseId: x.id, sets: q.sets, reps: q.reps };
-        for (const k of ['pct', 'weight', 'rpe', 'progression']) if (q[k] != null) item[k] = q[k];
+        for (const k of ['pct', 'rpe', 'progression']) if (q[k] != null) item[k] = q[k];
+        // Typed weights are in this device's unit unless the line says lb or kg.
+        if (q.weight != null) item.weight = store.readW(q.weight);
+        if (q.progression?.type === 'add_weight') item.progression.step = fromUnit(q.progression.step, q.progUnit || store.unit());
         b.days[di].items.push(item);
       }
       save();
@@ -461,7 +525,7 @@ export function blockEditor(root, { id }, query) {
 // ---------- assign ----------
 
 export function assign(root, _p, query) {
-  const blocksList = store.all('blocks');
+  const blocksList = store.all('blocks').filter((b) => !isWarmup(b));
   const athletes = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
   const groups = [...new Set(athletes.map((a) => a.group).filter(Boolean))];
   const pre = query.get('athlete');

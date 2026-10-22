@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, unitSeg, PATTERN_LABEL } from './ui.js';
 
 const today = () => toISO(new Date());
 
@@ -30,14 +30,15 @@ export function fmtSecs(n) {
 }
 
 function targetText(set, measure) {
-  const w = set.targetWeight ?? set.weight;
+  const w = store.showW(set.targetWeight ?? set.weight);
   if (measure === 'time') {
     const t = fmtSecs(set.targetSecs ?? set.secs);
     return w && t ? `${w} × ${t}` : t;
   }
   const reps = set.targetReps ?? set.reps;
+  const word = measure === 'breaths' ? 'breath' : 'rep';
   if (w) return `${w} × ${reps}`;
-  return reps ? `${reps} rep${reps === 1 ? '' : 's'}` : '';
+  return reps ? `${reps} ${word}${reps === 1 ? '' : 's'}` : '';
 }
 
 // Group letters for supersets ("A1", "A2") or plain order numbers; warmup
@@ -109,14 +110,15 @@ export function today_(root, { id }, query) {
 function entryCard(log, entry, i, label) {
   const ex = store.get('exercises', entry.exerciseId) || { name: entry.exerciseId };
   const last = store.lastTime(log.athleteId, entry.exerciseId, log.date);
-  const units = store.settings().units;
+  const units = store.unit();
   const measure = entry.measure || 'reps';
-  const loaded = ex.loaded !== false && measure !== 'none';
+  const loaded = ex.loaded !== false && measure !== 'none' && measure !== 'breaths';
   const amount = (s) => (measure === 'time' ? fmtSecs(s.secs) : `${s.reps ?? ''}`);
-  const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${s.weight}×${amount(s)}` : amount(s)).join(', ')}` : '';
-  // The box the athlete fills in: reps, seconds, or nothing for a check-off item.
+  const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${store.showW(s.weight)}×${amount(s)}` : amount(s)).join(', ')}` : '';
+  // The box the athlete fills in: reps, breaths, seconds, or nothing for a check-off item.
   const k = measure === 'time' ? 'secs' : 'reps';
-  const box = (s, j) => (measure === 'none' ? '' : `<label class="field"><input type="number" inputmode="numeric" min="0" value="${s[k] ?? ''}" placeholder="${s[measure === 'time' ? 'targetSecs' : 'targetReps'] || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="${k}" aria-label="${measure === 'time' ? 'Seconds' : 'Reps'}, set ${j + 1}"><span>${k}</span></label>`);
+  const boxName = { time: 'Secs', breaths: 'Breaths' }[measure] || 'Reps';
+  const box = (s, j) => (measure === 'none' ? '' : `<label class="field"><input type="number" inputmode="numeric" min="0" value="${s[k] ?? ''}" placeholder="${s[measure === 'time' ? 'targetSecs' : 'targetReps'] || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="${k}" aria-label="${boxName}, set ${j + 1}"><span>${boxName.toLowerCase()}</span></label>`);
   const cols = `${loaded ? '' : 'no-load'} ${measure === 'none' ? 'check-only' : ''}`;
   const tags = [];
   if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
@@ -125,7 +127,7 @@ function entryCard(log, entry, i, label) {
     <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
       <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure))}</span>
-      ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${s.weight ?? ''}" placeholder="${s.targetWeight ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
+      ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight) ?? ''}" placeholder="${store.showW(s.targetWeight) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
@@ -139,7 +141,7 @@ function entryCard(log, entry, i, label) {
     </header>
     ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
     ${ex.video ? `<a class="link small" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Watch demo</a>` : ''}
-    ${measure === 'none' ? '' : `<div class="set-head ${cols}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>${measure === 'time' ? 'Secs' : 'Reps'}</span><span></span></div>`}
+    ${measure === 'none' ? '' : `<div class="set-head ${cols}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>${boxName}</span><span></span></div>`}
     <div class="sets">${rows}</div>
     <div class="entry-foot">
       ${measure === 'none' ? '' : `<button class="link" data-action="addSet" data-i="${i}">+ Set</button>`}
@@ -175,7 +177,7 @@ export function session(root, { id, date }) {
     <header class="page-head">
       <a class="back" href="#/athlete/${id}?d=${date}">‹ ${fmtDate(date)}</a>
       <span class="kicker">${esc(block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
-      <div class="row between"><h1>${esc(log.name)}</h1><button class="chip" data-action="switch">Switch</button></div>
+      <div class="row between"><h1>${esc(log.name)}</h1><div class="row gap">${unitSeg(store.unit())}<button class="chip" data-action="switch">Switch</button></div></div>
     </header>
     ${log.entries.map((e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
@@ -208,7 +210,7 @@ export function session(root, { id, date }) {
         if (s.secs == null) s.secs = s.targetSecs ?? null;
         if (s.weight == null) s.weight = s.targetWeight ?? null;
         const row = el.closest('.set');
-        for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = s[f]; }
+        for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = f === 'weight' ? store.showW(s[f]) : s[f]; }
       }
       el.setAttribute('aria-pressed', s.done);
       el.closest('.set').classList.toggle('done', s.done);
@@ -217,9 +219,11 @@ export function session(root, { id, date }) {
     },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
-      s[el.dataset.k] = el.value === '' ? null : Number(el.value);
+      const v = el.value === '' ? null : Number(el.value);
+      s[el.dataset.k] = el.dataset.k === 'weight' ? store.readW(v) : v;
       persist();
     },
+    setUnits: (el) => { store.setSetting('units', el.dataset.v); rerender(); },
     addSet: (el) => {
       const sets = log.entries[el.dataset.i].sets;
       const last = sets[sets.length - 1] || {};
@@ -242,7 +246,7 @@ export function session(root, { id, date }) {
       for (const e of log.entries) {
         const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
         const cur = athlete.maxes?.[e.exerciseId];
-        if (cur && best > cur) { athlete.maxes[e.exerciseId] = Math.round(best); prs.push(store.get('exercises', e.exerciseId)?.name); }
+        if (cur && best > cur) { athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(store.get('exercises', e.exerciseId)?.name); }
       }
       if (prs.length) store.put('athletes', athlete);
       store.saveLog(log);
@@ -353,7 +357,8 @@ export function week(root, { id }, query) {
   const cur = weekSummary(id, mon);
   const prev = weekSummary(id, addDays(mon, -7));
   const trend = loadTrend(id, addDays(mon, 6) < today() ? addDays(mon, 6) : today());
-  const u = store.settings().units;
+  const u = store.unit();
+  const w = store.showW;
   const t = cur.done;
   const patterns = Object.keys(PATTERN_LABEL).filter((p) => (t.setsByPattern[p] || cur.planned.setsByPattern[p]));
   const sessions = cur.days.filter((d) => d.log);
@@ -367,7 +372,7 @@ export function week(root, { id }, query) {
       </div></div></header>
     <div class="stats">
       ${stat('Sessions', cur.sessionsDone, null, ` / ${cur.sessionsPlanned}`)}
-      ${stat('Tonnage', t.tonnage, prev.done.tonnage, ` ${u}`)}
+      ${stat('Tonnage', w(t.tonnage), w(prev.done.tonnage), ` ${u}`)}
       ${stat('Plyo contacts', t.contacts, prev.done.contacts)}
       ${stat('High-intensity contacts', t.highContacts, prev.done.highContacts)}
       ${stat('Total reps', t.reps, prev.done.reps)}
@@ -378,13 +383,13 @@ export function week(root, { id }, query) {
     <section class="card"><h3>Each workout</h3>
       ${sessions.length ? `<div class="scroll-x"><table class="tbl compact"><thead><tr><th>Workout</th><th>${u}</th><th>Contacts</th><th>Sets</th><th>RPE</th></tr></thead><tbody>
         ${sessions.map((d) => `<tr><td><a href="#/athlete/${id}/session/${d.iso}">${esc(d.log.name)}</a><br><small class="muted">${fmtDate(d.iso)}</small></td>
-          <td>${fmt(d.totals.tonnage)}</td><td>${fmt(d.totals.contacts)}</td><td>${fmt(d.totals.sets)}</td><td>${d.log.sessionRpe ?? '–'}</td></tr>`).join('')}
+          <td>${fmt(w(d.totals.tonnage))}</td><td>${fmt(d.totals.contacts)}</td><td>${fmt(d.totals.sets)}</td><td>${d.log.sessionRpe ?? '–'}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted">No workouts logged this week yet.</p>'}
     </section>
     <section class="card">
       <h3>Planned vs done</h3>
       <table class="tbl"><thead><tr><th></th><th>Planned</th><th>Done</th></tr></thead><tbody>
-        <tr><td>Tonnage (${u})</td><td>${fmt(cur.planned.tonnage)}</td><td>${fmt(t.tonnage)}</td></tr>
+        <tr><td>Tonnage (${u})</td><td>${fmt(w(cur.planned.tonnage))}</td><td>${fmt(w(t.tonnage))}</td></tr>
         <tr><td>Plyo contacts</td><td>${fmt(cur.planned.contacts)}</td><td>${fmt(t.contacts)}</td></tr>
         <tr><td>Sets</td><td>${fmt(cur.planned.sets)}</td><td>${fmt(t.sets)}</td></tr>
         <tr><td>Reps at 80%+ of max</td><td>${fmt(cur.planned.zones.z80 + cur.planned.zones.z90)}</td><td>${fmt(t.zones.z80 + t.zones.z90)}</td></tr>
@@ -394,7 +399,7 @@ export function week(root, { id }, query) {
       ${patterns.length ? bars(patterns.map((p) => ({ label: PATTERN_LABEL[p], value: t.setsByPattern[p] || 0, sub: `of ${cur.planned.setsByPattern[p] || 0}` }))) : '<p class="muted">Nothing logged yet this week.</p>'}
     </section>
     <section class="card"><h3>Tonnage by day</h3>
-      ${bars(cur.days.map((d) => ({ label: fmtDate(d.iso, { weekday: 'short' }), value: Math.round(d.totals.tonnage) })), ` ${u}`)}
+      ${bars(cur.days.map((d) => ({ label: fmtDate(d.iso, { weekday: 'short' }), value: Math.round(w(d.totals.tonnage)) })), ` ${u}`)}
     </section>
     <section class="card"><h3>Load trend</h3>
       ${trend.ratio == null
@@ -408,18 +413,18 @@ export function week(root, { id }, query) {
 export function history(root, { id }) {
   const logs = store.logsFor(id).filter((l) => l.finished).reverse();
   const ex = store.exercisesById();
-  const u = store.settings().units;
+  const u = store.unit();
   const athlete = store.get('athletes', id);
   const maxes = Object.entries(athlete?.maxes || {});
   root.innerHTML = `
     <header class="page-head"><h1>History</h1></header>
-    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}</span><b>${fmt(v)} ${u}</b></li>`).join('')}</ul></section>` : ''}
+    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}</span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
       return `<a class="card log-row" href="#/athlete/${id}?d=${l.date}">
         <div><b>${esc(l.name)}</b><p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
-        <div class="right"><b>${fmt(t.tonnage)}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
+        <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
     }).join('') || '<p class="empty">No finished sessions yet.</p>'}`;
 }

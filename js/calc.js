@@ -15,6 +15,12 @@ export const PLYO_TIERS = {
 // Contacts at or above this tier are counted on their own line.
 export const HIGH_TIER = 5;
 
+// Weights are stored in pounds. Each device shows and takes them in its own
+// unit (lb or kg), so a coach in kg and an athlete in lb see the same numbers.
+export const LB_PER_KG = 2.20462;
+export const toUnit = (lb, unit) => (lb == null ? null : unit === 'kg' ? lb / LB_PER_KG : lb);
+export const fromUnit = (v, unit) => (v == null ? null : unit === 'kg' ? v * LB_PER_KG : v);
+
 export function roundTo(x, step = 5) {
   if (!step) return x;
   return Math.round(x / step) * step;
@@ -58,9 +64,11 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
   return roundTo(weight, rounding);
 }
 
-// How an item is measured: 'reps' (default), 'time' (seconds per set), or
+// How an item is measured: 'reps' (default), 'time' (seconds per set),
+// 'breaths' (a count like reps, kept in the reps field, never loaded), or
 // 'none' (no sets or reps; the athlete just checks it off, e.g. a warmup).
 export const measureOf = (item) => item.measure || 'reps';
+export const isCount = (measure) => measure === 'reps' || measure === 'breaths';
 
 export function prescribedSecs(item, week) {
   const prog = item.progression || {};
@@ -82,9 +90,9 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
     name: day.name,
     items: day.items.map((item) => {
       const measure = measureOf(item);
-      const reps = measure === 'reps' ? prescribedReps(item, week) : null;
+      const reps = isCount(measure) ? prescribedReps(item, week) : null;
       const secs = measure === 'time' ? prescribedSecs(item, week) : null;
-      const weight = measure === 'none' ? null : prescribedWeight(item, athlete, week, block, rounding);
+      const weight = measure === 'none' || measure === 'breaths' ? null : prescribedWeight(item, athlete, week, block, rounding);
       const n = measure === 'none' ? 1 : prescribedSets(item, block, week);
       return {
         exerciseId: item.exerciseId,
@@ -110,7 +118,8 @@ export function sessionTotals(session, exercises, onlyDone = true) {
     const ex = exercises[entry.exerciseId];
     if (!ex || entry.warmup) continue; // warmups don't count toward training load
     for (const s of setsOf(entry, onlyDone)) {
-      const reps = Number(s.reps) || 0;
+      // Breaths count as sets but not as reps, tonnage or contacts.
+      const reps = entry.measure === 'breaths' ? 0 : Number(s.reps) || 0;
       const w = Number(s.weight) || 0;
       t.sets += 1;
       t.reps += reps;
@@ -235,6 +244,7 @@ export function parseQuickEntry(line) {
     const unit = (prog[2] || '').toLowerCase();
     const type = unit === '%' ? 'add_pct' : unit.startsWith('rep') ? 'add_reps' : 'add_weight';
     out.progression = { type, step: Number(prog[1]) };
+    if (unit === 'lb' || unit === 'kg') out.progUnit = unit;
   }
   return out;
 }
