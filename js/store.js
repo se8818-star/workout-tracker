@@ -40,7 +40,12 @@ export const isDemo = () => demo;
 // as echoes, and re-rendering for those would wipe whatever is being typed).
 export function applyRemote(kind, id, data) {
   if (!db[kind]) return false;
-  if (db.dirty[`${kind}/${id}`]) return false; // a local edit is waiting to upload; it wins
+  if (db.dirty[`${kind}/${id}`]) {
+    // A local edit is waiting to upload; it wins, except that a workout
+    // finished on another device beats an unfinished copy here.
+    if (!(kind === 'logs' && data?.finished && !db[kind][id]?.finished)) return false;
+    delete db.dirty[`${kind}/${id}`];
+  }
   const cur = db[kind][id];
   if (!data) { if (!cur) return false; delete db[kind][id]; return true; }
   if (cur && JSON.stringify(cur) === JSON.stringify(data)) return false;
@@ -146,13 +151,20 @@ export function lastTime(athleteId, exerciseId, beforeIso) {
   return exerciseHistory(athleteId, exerciseId, beforeIso)[0] || null;
 }
 
+// Only the athlete's own device creates or refreshes their logs just by opening
+// a day. A coach previewing an athlete sees the same thing, but nothing is saved
+// until they actually log a set; otherwise the coach's copy, which can be a
+// few seconds behind, would upload over what the athlete just did.
+const ownsLogs = () => demo || db.settings.me?.role !== 'coach';
+const keepLog = (log) => (ownsLogs() ? put('logs', log) : log);
+
 // Start (or reopen) a log for a planned session.
 export function startLog(athleteId, iso, plan) {
   const existing = logFor(athleteId, iso);
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
   const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep());
-  return put('logs', {
+  return keepLog({
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
@@ -165,7 +177,7 @@ export function startWarmupLog(athleteId, iso, w) {
   const existing = warmupLogFor(athleteId, iso);
   if (existing) return existing;
   const s = buildSession(w.block, 0, 0, get('athletes', athleteId), roundStep());
-  return put('logs', {
+  return keepLog({
     id: `${logId(athleteId, iso)}:warmup`, athleteId, date: iso, warmup: true,
     assignmentId: w.assignment.id, blockId: w.block.id, week: 0, dayIndex: 0, name: w.block.name,
     entries: sessionEntries(s, unit()),
@@ -183,7 +195,7 @@ export function refreshLog(log) {
   const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
   const name = log.warmup ? log.name : s.name;
   if (name === log.name && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
-  return put('logs', { ...log, name, entries });
+  return keepLog({ ...log, name, entries });
 }
 
 export function saveLog(log) {
