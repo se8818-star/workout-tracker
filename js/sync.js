@@ -127,7 +127,7 @@ export function gate(root) {
 
 function loginView(root) {
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1><p class="muted">Sign in with your email. We'll send you a sign-in link (or a 6-digit code).</p></header>
+    <header class="page-head hero"><h1>Training log</h1><p class="muted">Sign in with your email. We'll email you a 6-digit code.</p></header>
     <section class="card form">
       <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email"></label>
       <button class="btn wide" data-action="send">Send code</button>
@@ -143,7 +143,7 @@ function loginView(root) {
       const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
       if (error) return toast(error.message);
       $('#lg-code', root).hidden = false;
-      toast('Check your email: tap the link, or type the code here.');
+      toast('Check your email for a 6-digit code.');
     },
     verify: async () => {
       const email = $('#lg-email', root).value.trim();
