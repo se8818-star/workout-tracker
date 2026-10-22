@@ -43,7 +43,10 @@ Run the tests for the training math with `node --test`.
 ## Put it online for athletes (free)
 
 1. **Database.** In Supabase, open SQL Editor → New query, paste all of
-   [`supabase/schema.sql`](supabase/schema.sql), and press Run.
+   [`supabase/schema.sql`](supabase/schema.sql), and press Run. Then, in a new query, add the
+   email you'll sign in with as the coach:
+   `insert into coach_emails (email) values ('you@example.com');`
+   Only emails on that list can create a team; everyone else can only join as an athlete.
 2. **Sign-in codes.** In Supabase, Authentication → Emails → "Magic Link" template: add
    `{{ .Token }}` to the email body so people get a 6-digit code (codes work better than links
    inside a home-screen app).

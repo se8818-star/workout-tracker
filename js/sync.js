@@ -165,10 +165,15 @@ function teamView(root) {
       <label class="field-row"><span>Your name</span><input id="tm-name" autocomplete="name"></label>
       <label class="field-row"><span>Group</span><input id="tm-group" placeholder="e.g. Pitchers (optional)"></label>
       <button class="btn wide" data-action="join">Join team</button></section>
-    <section class="card form"><h3>I'm a coach</h3>
-      <label class="field-row"><span>Team name</span><input id="tm-team"></label>
-      <button class="btn ghost wide" data-action="create">Create a team</button></section>
+    <div id="tm-coach"></div>
     <button class="link" data-action="signout">Sign out</button>`;
+  // Only emails on the coach list (see supabase/schema.sql) get the coach option.
+  sb.rpc('can_coach').then(({ data }) => {
+    if (!data) return;
+    $('#tm-coach', root).innerHTML = `<section class="card form"><h3>I'm a coach</h3>
+      <label class="field-row"><span>Team name</span><input id="tm-team"></label>
+      <button class="btn ghost wide" data-action="create">Create a team</button></section>`;
+  });
   bindActions(root, {
     join: async () => {
       const { error } = await sb.rpc('join_team', { code: $('#tm-code', root).value, athlete_name: $('#tm-name', root).value.trim(), athlete_group: $('#tm-group', root).value.trim() });
