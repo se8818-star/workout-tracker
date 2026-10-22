@@ -4,9 +4,9 @@ import * as store from './store.js';
 import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, PATTERN_LABEL, $ } from './ui.js';
-import { pickExerciseSheet } from './athlete.js';
+import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
-import { removeAthleteLogin } from './sync.js';
+import { removeAthleteLogin, removeVideos, videoFresh } from './sync.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -95,11 +95,13 @@ export function athlete(root, { id }) {
         const t = sessionTotals(l, ex, true);
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
+        const vids = l.entries.flatMap((e) => e.sets.map((s, j) => (videoFresh(s.video) ? `<button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ ${esc(ex[e.exerciseId]?.name || '')} · set ${j + 1}</button>` : ''))).join('');
         return `<div class="log-item"><div class="row between"><b>${esc(l.name)}</b><span class="muted">${fmtDate(l.date)}</span></div>
           <p class="muted small">RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u} · ${fmt(t.contacts)} contacts${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
-          ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}</div>`;
+          ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}
+          ${vids ? `<div class="row gap wrap vids">${vids}</div>` : ''}</div>`;
       }).join('') || '<p class="muted">Nothing logged yet.</p>'}
     </section>
     <section class="card"><h3>Remove from team</h3>
@@ -110,12 +112,14 @@ export function athlete(root, { id }) {
     removeAthlete: async () => {
       if (!await ask(`${a.name} loses access right away. Their programs, logs and notes are deleted too. This can't be undone.`, { title: `Remove ${a.name}?`, ok: 'Remove from team', danger: true })) return;
       try { await removeAthleteLogin(id); } catch (e) { toast(`Couldn't remove: ${e.message}`); return; }
+      removeVideos(store.logsFor(id).flatMap((l) => l.entries.flatMap((e) => e.sets.map((s) => s.video?.path).filter(Boolean))));
       for (const g of store.assignmentsFor(id)) store.del('assignments', g.id);
       for (const l of store.logsFor(id)) store.del('logs', l.id);
       store.del('athletes', id);
       toast(`${a.name} removed`);
       location.hash = '#/coach';
     },
+    playVideo: (el) => videoSheet(el.dataset.path),
     setMax: (el) => { a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved'); },
     setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
     addMax: () => {

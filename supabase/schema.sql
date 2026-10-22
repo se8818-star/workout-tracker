@@ -158,3 +158,29 @@ grant execute on function remove_athlete(uuid, text) to authenticated;
 grant execute on function can_coach() to authenticated;
 grant execute on function team_for_code(text) to anon, authenticated;
 grant execute on function join_team(text, text, text) to authenticated;
+
+-- Form-check videos: a private Storage bucket. Files sit under
+-- <team id>/<athlete id>/. The coach sees every clip in the team; an athlete
+-- uploads, watches and deletes only their own. The app keeps clips 14 days.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('form-videos', 'form-videos', false, 52428800, array['video/*'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+create or replace function can_use_video(path text) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare parts text[] := string_to_array(path, '/'); t uuid;
+begin
+  begin t := parts[1]::uuid; exception when others then return false; end;
+  return is_coach(t) or (parts[2] is not null and parts[2] = my_athlete_id(t));
+end $$;
+grant execute on function can_use_video(text) to authenticated;
+
+drop policy if exists form_videos_read on storage.objects;
+create policy form_videos_read on storage.objects for select to authenticated
+  using (bucket_id = 'form-videos' and public.can_use_video(name));
+drop policy if exists form_videos_add on storage.objects;
+create policy form_videos_add on storage.objects for insert to authenticated
+  with check (bucket_id = 'form-videos' and public.can_use_video(name));
+drop policy if exists form_videos_delete on storage.objects;
+create policy form_videos_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'form-videos' and public.can_use_video(name));

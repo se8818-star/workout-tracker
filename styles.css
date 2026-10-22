@@ -224,6 +224,15 @@ select.dd-native { display: none; }
 .set.done input { background: var(--turf-soft); }
 .set.done .target { text-decoration: line-through 2px; }
 .entry-foot { display: flex; gap: 16px; align-items: center; }
+/* form-check videos */
+.set-video { display: flex; align-items: center; gap: 14px; padding: 0 0 4px 34px; }
+.vid-chip {
+  font: 700 0.7rem var(--mono); text-transform: uppercase; color: var(--paper); background: var(--ink); border: 0;
+  padding: 7px 10px; cursor: pointer; box-shadow: 2px 2px 0 var(--track);
+}
+.vid-chip:active { transform: translate(2px, 2px); box-shadow: none; }
+.vids { margin-top: 8px; }
+.form-video { width: 100%; max-height: 70vh; background: var(--ink); display: block; }
 .note-field { display: block; margin-top: 6px; }
 .note-field[hidden] { display: none; }
 .note-field span { display: block; font-family: var(--mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
