@@ -170,6 +170,14 @@ select.dd-native { display: none; }
 }
 .workout-card:active { transform: translate(3px, 3px); box-shadow: none; }
 .workout-card.done { background: var(--turf); }
+/* the assigned warmup: a shorter highlighter-yellow card above the workout */
+.workout-card.warm { background: var(--hi); color: var(--ink); padding: 16px 20px; }
+.workout-card.warm .kicker, .workout-card.warm .muted { color: var(--ink); }
+.workout-card.warm h2 { font-size: clamp(1.8rem, 8vw, 2.3rem); }
+.workout-card.warm .arrow { width: 42px; height: 42px; font-size: 1.5rem; }
+.workout-card.warm.live .status.live { background: var(--card); }
+.workout-card.warm.done { background: var(--turf); color: var(--on-track); }
+.workout-card.warm.done .kicker, .workout-card.warm.done .muted { color: var(--on-track); }
 .workout-card .kicker { color: var(--on-track); }
 .workout-card h2 { font-size: clamp(2.3rem, 11vw, 3.2rem); font-stretch: 58%; margin: 8px 0 6px; }
 .workout-card .muted { color: var(--on-track); font-family: var(--mono); font-size: 0.72rem; }
