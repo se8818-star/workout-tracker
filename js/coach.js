@@ -6,6 +6,7 @@ import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
+import { removeAthleteLogin } from './sync.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -101,8 +102,21 @@ export function athlete(root, { id }) {
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
           ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}</div>`;
       }).join('') || '<p class="muted">Nothing logged yet.</p>'}
+    </section>
+    <section class="card"><h3>Remove from team</h3>
+      <p class="muted small">${esc(a.name.split(' ')[0])} loses access right away. Their programs, logs and notes are deleted. To come back they'd need the team code again.</p>
+      <button class="btn ghost wide danger" data-action="removeAthlete">Remove ${esc(a.name)}</button>
     </section>`;
   bindActions(root, {
+    removeAthlete: async () => {
+      if (!confirm(`Remove ${a.name} from the team? Their logs and notes are deleted too. This can't be undone.`)) return;
+      try { await removeAthleteLogin(id); } catch (e) { toast(`Couldn't remove: ${e.message}`); return; }
+      for (const g of store.assignmentsFor(id)) store.del('assignments', g.id);
+      for (const l of store.logsFor(id)) store.del('logs', l.id);
+      store.del('athletes', id);
+      toast(`${a.name} removed`);
+      location.hash = '#/coach';
+    },
     setMax: (el) => { a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved'); },
     setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
     addMax: () => {
