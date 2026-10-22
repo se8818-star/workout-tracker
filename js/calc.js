@@ -77,6 +77,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
       return {
         exerciseId: item.exerciseId,
         note: item.note || '',
+        tempo: item.tempo || '',
         group: item.group || '',
         sets: Array.from({ length: n }, () => ({ reps, weight, rpe: item.rpe ?? null, done: false })),
       };
