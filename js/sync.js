@@ -55,6 +55,8 @@ async function loadMembership() {
     return;
   }
   const m = data?.[0];
+  // Removed from the team since last time: drop this device's copy of its data.
+  if (!m && store.settings().membership) store.clearAll();
   membership = m ? { team_id: m.team_id, role: m.role, athlete_id: m.athlete_id, team: m.teams } : null;
   store.setSetting('membership', membership);
   if (membership) {
@@ -125,32 +127,75 @@ export function gate(root) {
   return false;
 }
 
-function loginView(root) {
+// Sign-up details wait here between "Send code" and the code being typed in,
+// so the new account can join the team right after it's verified.
+const PENDING = 'wt-pending-join';
+const readPending = () => { try { return JSON.parse(localStorage.getItem(PENDING)) || null; } catch { return null; } };
+const writePending = (v) => { try { if (v) localStorage.setItem(PENDING, JSON.stringify(v)); else localStorage.removeItem(PENDING); } catch { /* private mode */ } };
+
+// The first page: sign in to an existing account, or create one and join a
+// team with the coach's code. Both use the emailed 6-digit code.
+function loginView(root, mode = 'signin', sentTo = '') {
+  const create = mode === 'create';
+  const pending = readPending();
+  const codeStep = sentTo ? `
+      <p class="muted">We emailed a 6-digit code to <b>${esc(sentTo)}</b>.</p>
+      <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
+      <button class="btn wide" data-action="verify">${create ? 'Create account' : 'Sign in'}</button>
+      <button class="link" data-action="restart">Use a different email</button>` : '';
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1><p class="muted">Sign in with your email. We'll email you a 6-digit code.</p></header>
+    <header class="page-head hero"><h1>Training log</h1></header>
+    <div class="seg auth-tabs" role="tablist">
+      <button class="${create ? '' : 'on'}" role="tab" aria-selected="${!create}" data-action="mode" data-v="signin">Sign in</button>
+      <button class="${create ? 'on' : ''}" role="tab" aria-selected="${create}" data-action="mode" data-v="create">Create account</button>
+    </div>
     <section class="card form">
-      <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email"></label>
-      <button class="btn wide" data-action="send">Send code</button>
-      <div id="lg-code" hidden>
-        <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
-        <button class="btn wide" data-action="verify">Sign in</button>
-      </div>
+      ${create ? `
+        <p class="muted">New here? Ask your coach for the 6-letter team code.</p>
+        <label class="field-row"><span>Your name</span><input id="lg-name" autocomplete="name" value="${esc(pending?.name || '')}"></label>
+        <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>
+        <label class="field-row"><span>Team code</span><input id="lg-team" maxlength="6" autocapitalize="characters" value="${esc(pending?.code || '')}"></label>
+        <label class="field-row"><span>Group</span><input id="lg-group" placeholder="e.g. Pitchers (optional)" value="${esc(pending?.group || '')}"></label>
+        ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}`
+      : `<p class="muted">Welcome back. We'll email you a 6-digit code.</p>
+        <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>`}
+      ${sentTo ? codeStep : `<button class="btn wide" data-action="send">Send code</button>`}
     </section>`;
+  if (sentTo) $('#lg-otp', root)?.focus();
   bindActions(root, {
+    mode: (el) => loginView(root, el.dataset.v),
+    restart: () => loginView(root, mode),
     send: async () => {
       const email = $('#lg-email', root).value.trim();
-      if (!email) return;
-      const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-      if (error) return toast(error.message);
-      $('#lg-code', root).hidden = false;
-      toast('Check your email for a 6-digit code.');
+      if (!email) return toast('Enter your email');
+      if (create) {
+        const name = $('#lg-name', root).value.trim();
+        const code = $('#lg-team', root).value.trim().toUpperCase();
+        if (!name) return toast('Enter your name');
+        if (!code) return toast('Enter the team code from your coach');
+        // Check the code before emailing, so a typo doesn't make an account with no team.
+        const { data: team, error: teamErr } = await sb.rpc('team_for_code', { code });
+        if (!teamErr && !team) return toast('No team with that code. Check it with your coach.');
+        writePending({ name, code, group: $('#lg-group', root).value.trim(), team: team || '' });
+      }
+      const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: create } });
+      if (error) {
+        if (!create && /signups not allowed|not found/i.test(error.message)) return toast('No account with that email yet. Tap "Create account".');
+        return toast(error.message);
+      }
+      loginView(root, mode, email);
     },
     verify: async () => {
-      const email = $('#lg-email', root).value.trim();
       const token = $('#lg-otp', root).value.trim();
-      const { data, error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
+      const { data, error } = await sb.auth.verifyOtp({ email: sentTo, token, type: 'email' });
       if (error) return toast(error.message);
       user = data.user;
+      const join = create && readPending();
+      if (join) {
+        const r = await sb.rpc('join_team', { code: join.code, athlete_name: join.name, athlete_group: join.group });
+        if (r.error) toast(r.error.message);
+        else writePending(null);
+      }
       await loadMembership();
       location.reload();
     },
@@ -193,6 +238,13 @@ function teamView(root) {
     },
     signout,
   });
+}
+
+// Coach only. Cuts the athlete's login off from the team (no-op in demo mode).
+export async function removeAthleteLogin(athleteId) {
+  if (!sb || !membership) return;
+  const { error } = await sb.rpc('remove_athlete', { t: membership.team_id, aid: athleteId });
+  if (error) throw error;
 }
 
 export async function signout() {

@@ -396,3 +396,7 @@ textarea { resize: vertical; }
 .set.done .unit-btn { background: var(--card); }
 .unit-field > span { display: block; font: 600 0.56rem var(--mono); text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
 .unit-field .seg { margin-top: 0; }
+
+/* Sign in / Create account tabs */
+.auth-tabs { display: flex; margin: 0 0 12px; }
+.auth-tabs button { flex: 1; min-height: 44px; font-size: 0.7rem; }

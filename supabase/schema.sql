@@ -122,6 +122,13 @@ begin
   return t;
 end $$;
 
+-- Lets the sign-up screen check a team code before emailing anyone.
+-- Returns the team's name, or null when no team has that code.
+create or replace function team_for_code(code text) returns text
+language sql stable security definer set search_path = public as $$
+  select name from teams where join_code = upper(trim(code));
+$$;
+
 -- An athlete joins with the coach's code; creates their athlete record.
 create or replace function join_team(code text, athlete_name text, athlete_group text default '') returns uuid
 language plpgsql security definer set search_path = public as $$
@@ -137,6 +144,17 @@ begin
   return t;
 end $$;
 
+-- A coach removes an athlete: their login loses access to the team. The app
+-- deletes the athlete's records itself (coaches can write any team record).
+create or replace function remove_athlete(t uuid, aid text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_coach(t) then raise exception 'Only the coach can remove athletes'; end if;
+  delete from members where team_id = t and athlete_id = aid and role = 'athlete';
+end $$;
+
 grant execute on function create_team(text) to authenticated;
+grant execute on function remove_athlete(uuid, text) to authenticated;
 grant execute on function can_coach() to authenticated;
+grant execute on function team_for_code(text) to anon, authenticated;
 grant execute on function join_team(text, text, text) to authenticated;
