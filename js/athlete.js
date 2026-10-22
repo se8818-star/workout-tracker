@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, PATTERN_LABEL } from './ui.js';
 
 const today = () => toISO(new Date());
 
@@ -274,8 +274,8 @@ export function session(root, { id, date }) {
       log.entries.push({ exerciseId: exId, unit: store.unit(), note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
     }),
-    switch: () => switchSheet(id, date, (plan) => {
-      if (log.entries.some((e) => e.sets.some((s) => s.done)) && !confirm('Replace the sets you already logged today?')) return;
+    switch: () => switchSheet(id, date, async (plan) => {
+      if (log.entries.some((e) => e.sets.some((s) => s.done)) && !await ask('The sets you already logged today are replaced.', { title: 'Switch workout?', ok: 'Switch', danger: true })) return;
       store.del('logs', log.id);
       log = store.startLog(id, date, plan);
       log.switchedFrom = plans[0] ? { week: plans[0].week, dayIndex: plans[0].dayIndex } : null;

@@ -80,6 +80,7 @@ small, .small { font-size: 0.82rem; }
 .btn:active { transform: translate(3px, 3px); box-shadow: none; }
 .btn.ghost { background: var(--card); color: var(--ink); }
 .btn.danger { color: var(--danger); }
+.btn.danger:not(.ghost) { background: var(--danger); color: #fff; }
 .btn.wide { width: 100%; margin-top: 14px; }
 .chip {
   display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 4px 12px;
@@ -336,6 +337,13 @@ textarea { resize: vertical; }
 .sheet-body { overflow-y: auto; padding: 0 16px 16px; }
 .sheet-body details { margin: 6px 0; border-bottom: var(--hair); }
 .sheet-body summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+.sheet-wrap.ask { align-items: center; padding: 16px; }
+.ask .sheet { max-width: 440px; border-bottom: var(--rule); box-shadow: var(--shadow); }
+.ask-msg { margin: 4px 0 18px; line-height: 1.45; }
+.ask-btns { display: flex; gap: 10px; margin-top: 18px; }
+.ask-btns .btn { flex: 1; padding: 12px; font-size: 1rem; }
+.ask-field { display: block; margin: 10px 0; }
+.ask-field span { display: block; font-family: var(--mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
 .pick { list-style: none; padding: 0; margin: 0; }
 .pick li + li button { border-top: var(--hair); }
 .pick button { width: 100%; text-align: left; padding: 12px 10px; min-height: var(--tap); display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; }

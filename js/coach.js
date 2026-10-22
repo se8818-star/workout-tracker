@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 import { removeAthleteLogin } from './sync.js';
@@ -51,11 +51,10 @@ export function board(root, _p, query) {
       <button class="btn ghost" data-action="addAthlete">+ Add athlete</button>
     </div>`;
   bindActions(root, {
-    addAthlete: () => {
-      const name = prompt('Athlete name');
-      if (!name) return;
-      const group = prompt('Group (e.g. Pitchers)', '') || '';
-      store.put('athletes', { id: store.uid('ath'), name: name.trim(), group, maxes: {} });
+    addAthlete: async () => {
+      const f = await askFields('Add athlete', [{ k: 'name', label: 'Name' }, { k: 'group', label: 'Group', placeholder: 'e.g. Pitchers' }], { ok: 'Add athlete' });
+      if (!f) return;
+      store.put('athletes', { id: store.uid('ath'), name: f.name, group: f.group, maxes: {} });
       board(root, _p, query);
     },
   });
@@ -109,7 +108,7 @@ export function athlete(root, { id }) {
     </section>`;
   bindActions(root, {
     removeAthlete: async () => {
-      if (!confirm(`Remove ${a.name} from the team? Their logs and notes are deleted too. This can't be undone.`)) return;
+      if (!await ask(`${a.name} loses access right away. Their programs, logs and notes are deleted too. This can't be undone.`, { title: `Remove ${a.name}?`, ok: 'Remove from team', danger: true })) return;
       try { await removeAthleteLogin(id); } catch (e) { toast(`Couldn't remove: ${e.message}`); return; }
       for (const g of store.assignmentsFor(id)) store.del('assignments', g.id);
       for (const l of store.logsFor(id)) store.del('logs', l.id);
@@ -124,7 +123,7 @@ export function athlete(root, { id }) {
       if (!v) return;
       a.maxes = { ...a.maxes, [exId]: store.readW(v) }; store.put('athletes', a); athlete(root, { id });
     },
-    unassign: (el) => { if (confirm('Remove this program from the athlete? Logged sessions stay.')) { store.del('assignments', el.dataset.id); athlete(root, { id }); } },
+    unassign: async (el) => { if (await ask('Logged sessions stay.', { title: 'Remove this program?', ok: 'Remove program', danger: true })) { store.del('assignments', el.dataset.id); athlete(root, { id }); } },
   });
 }
 
@@ -178,10 +177,11 @@ export function blocks(root) {
       b.id = store.uid('block'); b.name += ' (copy)';
       store.put('blocks', b); blocks(root);
     },
-    del: (el) => {
+    del: async (el) => {
       const used = store.all('assignments').some((a) => a.blockId === el.dataset.id);
       const warm = isWarmup(store.get('blocks', el.dataset.id) || {});
-      if (!confirm(warm ? 'Delete this warmup? Programs that already loaded it keep their copy.' : used ? 'This block is assigned to athletes. Delete it anyway?' : 'Delete this block?')) return;
+      const msg = warm ? 'Programs that already loaded it keep their copy.' : used ? 'This block is assigned to athletes.' : 'This can\'t be undone.';
+      if (!await ask(msg, { title: warm ? 'Delete this warmup?' : 'Delete this block?', ok: 'Delete', danger: true })) return;
       store.del('blocks', el.dataset.id); blocks(root);
     },
   });
@@ -393,8 +393,8 @@ export function blockEditor(root, { id }, query) {
       const d = structuredClone(b.days[di]); d.name += ' (copy)'; b.days.splice(di + 1, 0, d);
       store.put('blocks', b); view({ day: di + 1, with: null });
     },
-    dayDel: (el) => {
-      if (!confirm('Delete this day?')) return;
+    dayDel: async (el) => {
+      if (!await ask(`"${b.days[el.dataset.di].name}" and its exercises are removed from this block.`, { title: 'Delete this day?', ok: 'Delete day', danger: true })) return;
       b.days.splice(el.dataset.di, 1);
       store.put('blocks', b); view({ day: Math.max(0, Math.min(day, b.days.length - 1)), with: null });
     },
@@ -486,30 +486,31 @@ export function blockEditor(root, { id }, query) {
       }, { allowNew: true });
     },
     itemUnit: (el) => { const { di, ii } = itemOf(el); b.days[di].items[ii].unit = el.dataset.v; save(); },
-    warmLoad: (el) => {
+    warmLoad: async (el) => {
       const di = Number(el.dataset.di);
       const w = store.get('blocks', el.value);
       if (!w) return;
       const hasWarm = (d) => d.items.some((x) => x.warmup);
-      if (hasWarm(b.days[di]) && !confirm(`Replace this day's warmup with "${w.name}"?`)) { el.value = ''; return; }
+      if (hasWarm(b.days[di]) && !await ask(`This day already has a warmup. Swap it for "${w.name}"?`, { title: 'Replace warmup?', ok: 'Replace' })) { el.value = ''; return; }
       const load = (d) => { d.items = [...w.days[0].items.map((x) => ({ ...structuredClone(x), warmup: true })), ...d.items.filter((x) => !x.warmup)]; };
       load(b.days[di]);
-      if (b.days.length > 1 && confirm(`Use "${w.name}" on the other ${b.days.length - 1} day(s) too?`)) b.days.forEach(load);
+      if (b.days.length > 1 && await ask(`Use "${w.name}" on the other ${b.days.length - 1} day(s) too?`, { title: 'Every day?', ok: 'Use on every day', cancel: 'Just this day' })) b.days.forEach(load);
       save();
       toast(`Loaded "${w.name}"`);
     },
-    warmSave: (el) => {
-      const name = prompt('Name this warmup', `${b.name} warmup`);
-      if (!name) return;
+    warmSave: async (el) => {
+      const f = await askFields('Save warmup', [{ k: 'name', label: 'Name', value: `${b.name} warmup` }]);
+      if (!f) return;
+      const name = f.name;
       const items = structuredClone(b.days[el.dataset.di].items.filter((x) => x.warmup));
       store.put('blocks', { id: store.uid('block'), kind: 'warmup', name: name.trim(), weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items }] });
       save();
       toast(`Saved "${name.trim()}" to your warmups`);
     },
-    warmCopy: (el) => {
+    warmCopy: async (el) => {
       const di = Number(el.dataset.di);
       const warm = b.days[di].items.filter((x) => x.warmup);
-      if (!confirm(`Replace the warmup on the other ${b.days.length - 1} day(s) with this one?`)) return;
+      if (!await ask(`The warmup on the other ${b.days.length - 1} day(s) is replaced with this one.`, { title: 'Copy warmup?', ok: 'Copy to every day' })) return;
       b.days.forEach((d, i) => { if (i !== di) d.items = [...structuredClone(warm), ...d.items.filter((x) => !x.warmup)]; });
       save();
       toast('Warmup copied to every day');
