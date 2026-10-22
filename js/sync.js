@@ -139,7 +139,7 @@ function loginView(root, mode = 'signin', sentTo = '') {
   const create = mode === 'create';
   const pending = readPending();
   const codeStep = sentTo ? `
-      <p class="muted">We emailed a 6-digit code to <b>${esc(sentTo)}</b>.</p>
+      <p class="muted">We emailed ${create ? 'a 6-digit code' : 'a sign-in link and a 6-digit code'} to <b>${esc(sentTo)}</b>.${create ? '' : ' Tap the link, or type the code here.'}</p>
       <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
       <button class="btn wide" data-action="verify">${create ? 'Create account' : 'Sign in'}</button>
       <button class="link" data-action="restart">Use a different email</button>` : '';
@@ -157,7 +157,7 @@ function loginView(root, mode = 'signin', sentTo = '') {
         <label class="field-row"><span>Team code</span><input id="lg-team" maxlength="6" autocapitalize="characters" value="${esc(pending?.code || '')}"></label>
         <label class="field-row"><span>Group</span><input id="lg-group" placeholder="e.g. Pitchers (optional)" value="${esc(pending?.group || '')}"></label>
         ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}`
-      : `<p class="muted">Welcome back. We'll email you a 6-digit code.</p>
+      : `<p class="muted">Welcome back. We'll email you a sign-in link and a 6-digit code. Tap the link, or type the code here.</p>
         <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>`}
       ${sentTo ? codeStep : `<button class="btn wide" data-action="send">Send code</button>`}
     </section>`;
