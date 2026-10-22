@@ -81,8 +81,8 @@ export function athlete(root, { id }) {
       ${stat('Session load', w.load, null, ' AU')}
     </div>
     <section class="card"><h3>Programs</h3>
-      ${asg.map((g) => { const b = store.get('blocks', g.blockId); return `<div class="row between"><span><b>${esc(b?.name || '?')}</b><br><small class="muted">from ${fmtDate(g.startDate)} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
-      <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program</a>
+      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
+      <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
     </section>
     <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
       <p class="muted small">Prescribed weights come from these. They also update when a logged set beats them.</p>
@@ -130,14 +130,15 @@ export function athlete(root, { id }) {
 // ---------- blocks ----------
 
 // Saved warmups live with the blocks (kind 'warmup', one day) so they sync the
-// same way, but they are never assigned; a coach loads them into program days.
+// same way. A coach loads one into program days, or assigns it to athletes like
+// a block, and it then runs in front of their program on its weekdays.
 const isWarmup = (b) => b.kind === 'warmup';
 
 export function blocks(root) {
   const all = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
   const row = (b, sub) => `<div class="card row between">
       <a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${sub}</small></a>
-      <div class="row gap"><button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`;
+      <div class="row gap">${isWarmup(b) ? `<a class="chip" href="#/coach/assign?block=${b.id}">Assign</a>` : ''}<button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`;
   const tpl = (t) => `<div class="card row between">
         <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
         <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`;
@@ -146,7 +147,7 @@ export function blocks(root) {
     ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('')}
     <button class="btn" data-action="new">+ New block</button>
     <h2 class="sec-head">Warmups</h2>
-    <p class="muted">Saved warmups. Load one into any program day from that day's Warmup section.</p>
+    <p class="muted">Assign a warmup to athletes and it shows up in front of their workout. You can also load one into a program day from that day's Warmup section.</p>
     ${all.filter(isWarmup).map((b) => row(b, `${b.days[0]?.items.length || 0} exercises`)).join('')}
     <button class="btn ghost" data-action="newWarmup">+ New warmup</button>
     <section class="templates">
@@ -330,7 +331,7 @@ export function blockEditor(root, { id }, query) {
   root.innerHTML = isWarmup(b) ? `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Warmup name"></header>
-    <p class="muted small">A saved warmup. Load it into a program day from that day's Warmup section. Changing it here doesn't change programs that already loaded it.</p>
+    <p class="muted small">A saved warmup. <a href="#/coach/assign?block=${b.id}">Assign it</a> to athletes, or load it into a program day from that day's Warmup section. Changes here reach assigned athletes on their next workout, but not programs that already loaded a copy.</p>
     <section class="card day-card" data-di="0"><div class="sec warm-sec">
       ${warmItems(b.days[0], 0)}
       <button class="chip" data-action="itemAdd" data-di="0" data-warm="1">+ Warmup exercise</button>
@@ -548,25 +549,34 @@ export function blockEditor(root, { id }, query) {
 // ---------- assign ----------
 
 export function assign(root, _p, query) {
-  const blocksList = store.all('blocks').filter((b) => !isWarmup(b));
+  const all = store.all('blocks').sort((x, y) => x.name.localeCompare(y.name));
+  const programs = all.filter((b) => !isWarmup(b)), warmups = all.filter(isWarmup);
   const athletes = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
   const groups = [...new Set(athletes.map((a) => a.group).filter(Boolean))];
   const pre = query.get('athlete');
-  const blockId = query.get('block') || blocksList[0]?.id;
+  const blockId = query.get('block') || programs[0]?.id || warmups[0]?.id;
   const block = store.get('blocks', blockId);
   if (!block) {
     root.innerHTML = '<header class="page-head"><h1>Assign a program</h1></header><div class="empty"><p>Build a block first, then assign it here.</p><a class="btn" href="#/coach/blocks">Go to programs</a></div>';
     return;
   }
+  const warm = isWarmup(block);
   // Default to this week so the program shows up for athletes right away.
   const startMon = weekStart(today());
-  const wd = defaultWeekdays(block.days.length);
+  // A warmup runs on any days the coach picks; default to the athlete's program days.
+  const preDays = pre && store.assignmentsFor(pre).find((g) => !isWarmup(store.get('blocks', g.blockId) || {}))?.weekdays;
+  const wd = warm ? (preDays || defaultWeekdays(3)) : defaultWeekdays(block.days.length);
+  const opt = (b) => `<option value="${b.id}" ${b.id === blockId ? 'selected' : ''}>${esc(b.name)}</option>`;
   root.innerHTML = `
-    <header class="page-head"><h1>Assign a program</h1></header>
-    <section class="card form">
-      <label class="field-row"><span>Block</span><select id="as-block" data-action="pickBlock">${blocksList.map((b) => `<option value="${b.id}" ${b.id === blockId ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>
+    <header class="page-head"><h1>Assign ${warm ? 'a warmup' : 'a program'}</h1></header>
+    <section class="card form ${warm ? 'warm-form' : ''}">
+      <label class="field-row"><span>Block</span><select id="as-block" data-action="pickBlock">
+        ${programs.length ? `<optgroup label="Programs">${programs.map(opt).join('')}</optgroup>` : ''}
+        ${warmups.length ? `<optgroup label="Warmups">${warmups.map(opt).join('')}</optgroup>` : ''}</select></label>
+      ${warm ? '<p class="muted small">The warmup shows up in front of the athlete\'s workout on the days you pick. On a day with no program it\'s the whole session.</p>' : ''}
       <label class="field-row"><span>Start date</span><input type="date" id="as-start" value="${startMon}"></label>
-      <fieldset><legend>Training days (${block.days.length} per week, in order)</legend>
+      ${warm ? '<label class="field-row"><span>End date (optional)</span><input type="date" id="as-end"></label>' : ''}
+      <fieldset><legend>${warm ? 'Days to do it' : `Training days (${block.days.length} per week, in order)`}</legend>
         <div class="row gap wrap">${WEEKDAYS.map((d, i) => `<label class="check-chip"><input type="checkbox" name="wd" value="${i}" ${wd.includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></fieldset>
       <fieldset><legend>Athletes</legend>
         <div class="row gap wrap">${groups.map((g) => `<button class="chip" data-action="pickGroup" data-g="${esc(g)}">All ${esc(g)}</button>`).join('')}<button class="chip" data-action="pickAll">Everyone</button></div>
@@ -578,14 +588,19 @@ export function assign(root, _p, query) {
     pickGroup: (el) => { root.querySelectorAll('input[name=ath]').forEach((c) => { if (c.dataset.g === el.dataset.g) c.checked = true; }); },
     pickAll: () => { root.querySelectorAll('input[name=ath]').forEach((c) => { c.checked = true; }); },
     go: () => {
-      const blk = $('#as-block', root).value;
       const start = $('#as-start', root).value;
+      const end = warm ? $('#as-end', root).value : '';
       const weekdays = [...root.querySelectorAll('input[name=wd]:checked')].map((c) => Number(c.value));
       const ids = [...root.querySelectorAll('input[name=ath]:checked')].map((c) => c.value);
-      const nDays = store.get('blocks', blk).days.length;
       if (!ids.length) return toast('Pick at least one athlete');
-      if (weekdays.length !== nDays) return toast(`Pick exactly ${nDays} training days`);
-      for (const athleteId of ids) store.put('assignments', { id: store.uid('asg'), athleteId, blockId: blk, startDate: start, weekdays });
+      if (warm && !weekdays.length) return toast('Pick at least one day');
+      if (!warm && weekdays.length !== block.days.length) return toast(`Pick exactly ${block.days.length} training days`);
+      if (end && end < start) return toast('End date is before the start date');
+      for (const athleteId of ids) {
+        // One warmup at a time: a new warmup replaces the athlete's current one.
+        if (warm) for (const g of store.assignmentsFor(athleteId)) if (isWarmup(store.get('blocks', g.blockId) || {})) store.del('assignments', g.id);
+        store.put('assignments', { id: store.uid('asg'), athleteId, blockId: block.id, startDate: start, weekdays, ...(end ? { endDate: end } : {}) });
+      }
       toast(`Assigned to ${ids.length} athlete${ids.length > 1 ? 's' : ''}`);
       location.hash = '#/coach';
     },

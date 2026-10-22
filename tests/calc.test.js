@@ -139,3 +139,18 @@ test('an exercise programmed in kg rounds in kg and carries its unit into the se
   assert.equal(s.items[0].unit, 'kg');
   assert.equal(Math.round(calc.toUnit(s.items[0].sets[0].weight, 'kg') * 10) / 10, 110);
 });
+
+test('assigned warmups run on their weekdays until the end date', () => {
+  const a = { startDate: '2026-10-19', weekdays: [1, 3], endDate: '2026-10-29' };
+  assert.equal(calc.warmupScheduledOn(a, '2026-10-18'), false); // before start
+  assert.equal(calc.warmupScheduledOn(a, '2026-10-20'), true); // Tue
+  assert.equal(calc.warmupScheduledOn(a, '2026-10-21'), false); // Wed
+  assert.equal(calc.warmupScheduledOn(a, '2026-10-29'), true); // Thu, last day
+  assert.equal(calc.warmupScheduledOn(a, '2026-11-03'), false); // past end
+  assert.equal(calc.warmupScheduledOn({ startDate: '2026-10-19', weekdays: [1] }, '2027-03-02'), true); // no end
+});
+
+test('a warmup block builds warmup entries', () => {
+  const w = { kind: 'warmup', weeks: 1, days: [{ name: 'Warmup', items: [{ exerciseId: 'x', sets: 1, reps: 10 }] }] };
+  assert.equal(calc.buildSession(w, 0, 0, { maxes: {} }).items[0].warmup, true);
+});

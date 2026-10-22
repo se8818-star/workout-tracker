@@ -88,10 +88,12 @@ export function today_(root, { id }, query) {
   let body;
   if (log) {
     const block = store.get('blocks', log.blockId);
-    body = workoutCard(id, iso, log.name, block ? `${block.name} · Week ${log.week + 1}` : 'Workout', log.entries.length, log);
+    body = workoutCard(id, iso, log.name, block ? (block.kind === 'warmup' ? block.name : `${block.name} · Week ${log.week + 1}`) : 'Workout', log.entries.length, log);
   } else if (plans.length) {
     const p = plans[0];
-    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · Deload' : ''}`, p.block.days[p.dayIndex].items.length, null);
+    const items = p.block.days[p.dayIndex].items;
+    const count = p.warmup ? p.warmup.days[0].items.length + items.filter((x) => !x.warmup).length : items.length;
+    body = workoutCard(id, iso, p.warmupOnly ? 'Warmup' : p.block.days[p.dayIndex].name, p.warmupOnly ? p.block.name : `${p.block.name} · Week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · Deload' : ''}`, count, null);
   } else {
     body = `<div class="empty"><p><b>Rest day.</b> Nothing is scheduled.</p>
       <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
@@ -141,7 +143,7 @@ function entryCard(log, entry, i, label) {
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
-  return `<article class="entry ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
+  return `<article class="entry ${entry.warmup ? 'warm' : ''} ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
     <header>
       <span class="order">${label}</span>
       <div class="entry-title"><h3>${esc(ex.name)}</h3>
@@ -186,12 +188,12 @@ export function session(root, { id, date }) {
   root.innerHTML = `
     <header class="page-head">
       <a class="back" href="#/athlete/${id}?d=${date}">‹ ${fmtDate(date)}</a>
-      <span class="kicker">${esc(block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
+      <span class="kicker">${esc(block ? (block.kind === 'warmup' ? block.name : `${block.name} · Week ${log.week + 1}`) : '')}</span>
       <div class="row between"><h1>${esc(log.name)}</h1><button class="chip" data-action="switch">Switch</button></div>
     </header>
     ${log.entries.map((e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
-      const head = e.warmup && !log.entries[i - 1]?.warmup ? '<h2 class="sec-head">Warmup</h2>'
+      const head = e.warmup && !log.entries[i - 1]?.warmup ? '<h2 class="sec-head warm-head">Warmup</h2>'
         : !e.warmup && log.entries[i - 1]?.warmup ? '<h2 class="sec-head">Workout</h2>' : '';
       return head + entryCard(log, e, i, labels[i]);
     }).join('')}
@@ -342,7 +344,7 @@ export function pickExerciseSheet(onPick, { allowNew = false } = {}) {
 }
 
 function switchSheet(athleteId, iso, onPick) {
-  const groups = store.assignmentsFor(athleteId).map((a) => ({ a, block: store.get('blocks', a.blockId) })).filter((g) => g.block);
+  const groups = store.assignmentsFor(athleteId).map((a) => ({ a, block: store.get('blocks', a.blockId) })).filter((g) => g.block && g.block.kind !== 'warmup');
   if (!groups.length) { toast('No program assigned yet. Ask your coach.'); return; }
   const html = groups.map(({ a, block }) => {
     const curWeek = Math.max(0, Math.min(block.weeks - 1, Math.floor((new Date(iso) - new Date(a.startDate)) / (7 * 86400000))));
@@ -362,7 +364,7 @@ function switchSheet(athleteId, iso, onPick) {
       const b = e.target.closest('[data-a]');
       if (!b) return;
       const g = groups.find((x) => x.a.id === b.dataset.a);
-      onPick({ assignment: g.a, block: g.block, week: Number(b.dataset.w), dayIndex: Number(b.dataset.d) });
+      onPick({ assignment: g.a, block: g.block, week: Number(b.dataset.w), dayIndex: Number(b.dataset.d), warmup: store.warmupOn(athleteId, iso) });
     });
   });
 }
