@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import * as athleteViews from './athlete.js';
 import * as coachViews from './coach.js';
-import { esc, bindActions, toast } from './ui.js';
+import { esc, bindActions, toast, ask } from './ui.js';
 import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
 
 store.load({ cloud: cloudEnabled });
@@ -134,7 +134,7 @@ function settingsView(root) {
       a.download = `training-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
     },
-    reset: () => { if (confirm('Erase everything on this device and reload the demo?')) { store.reset(); toast('Demo data reset'); location.hash = '#/'; } },
+    reset: async () => { if (await ask('Everything on this device is erased and the demo reloads.', { title: 'Reset demo?', ok: 'Reset', danger: true })) { store.reset(); toast('Demo data reset'); location.hash = '#/'; } },
   });
 }
 

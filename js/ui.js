@@ -66,7 +66,38 @@ export function sheet(title, html, bind) {
   return wrap;
 }
 
-export function closeSheet() { $$('.sheet-wrap').forEach((n) => n.remove()); }
+export function closeSheet() { $$('.sheet-wrap').forEach((n) => { n._onClose?.(); n.remove(); }); }
+
+// In-app replacement for confirm(). Resolves true on OK, false on Cancel / ✕ / backdrop.
+export function ask(message, { title = 'Are you sure?', ok = 'OK', cancel = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const wrap = sheet(title, `<p class="ask-msg">${esc(message)}</p>
+      <div class="ask-btns"><button class="btn ghost" data-close>${esc(cancel)}</button><button class="btn ${danger ? 'danger' : ''}" data-ok>${esc(ok)}</button></div>`);
+    wrap.classList.add('ask');
+    wrap._onClose = () => resolve(false);
+    wrap.querySelector('[data-ok]').addEventListener('click', () => { wrap._onClose = null; closeSheet(); resolve(true); });
+    wrap.querySelector('[data-ok]').focus();
+  });
+}
+
+// In-app replacement for prompt(). fields: [{ k, label, value, placeholder }]. Resolves { k: value } or null.
+export function askFields(title, fields, { ok = 'Save', cancel = 'Cancel' } = {}) {
+  return new Promise((resolve) => {
+    const wrap = sheet(title, `<form class="ask-form">
+      ${fields.map((f) => `<label class="ask-field"><span>${esc(f.label)}</span><input name="${esc(f.k)}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off"></label>`).join('')}
+      <div class="ask-btns"><button type="button" class="btn ghost" data-close>${esc(cancel)}</button><button class="btn">${esc(ok)}</button></div></form>`);
+    wrap.classList.add('ask');
+    wrap._onClose = () => resolve(null);
+    const form = wrap.querySelector('form'), first = form.querySelector('input');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!first.value.trim()) { first.focus(); return; }
+      const out = Object.fromEntries(fields.map((f) => [f.k, form.elements[f.k].value.trim()]));
+      wrap._onClose = null; closeSheet(); resolve(out);
+    });
+    first.focus(); first.select();
+  });
+}
 
 export const PATTERN_LABEL = {
   squat: 'Squat', hinge: 'Hinge', push: 'Push', pull: 'Pull', carry: 'Carry', core: 'Core',
