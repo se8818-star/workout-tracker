@@ -82,7 +82,8 @@ function home(root) {
     </section>
     <section class="card">
       <h3>I'm an athlete</h3>
-      <ul class="pick">${athletes.map((a) => `<li><button data-action="athlete" data-id="${a.id}">${esc(a.name)} <small>${esc(a.group || '')}</small></button></li>`).join('')}</ul>
+      ${athletes.length ? `<ul class="pick">${athletes.map((a) => `<li><button data-action="athlete" data-id="${a.id}">${esc(a.name)} <small>${esc(a.group || '')}</small></button></li>`).join('')}</ul>`
+        : '<p class="muted">No athletes yet. Open the coach view and tap "+ Add athlete".</p>'}
     </section>`;
   bindActions(root, {
     coach: () => { store.setSetting('me', { role: 'coach' }); location.hash = '#/coach'; },

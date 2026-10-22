@@ -102,9 +102,3 @@ export const SEED_BLOCK = {
     },
   ],
 };
-
-export const SEED_ATHLETES = [
-  { id: 'ath-1', name: 'Jake Morales', group: 'Pitchers', maxes: { 'back-squat': 315, deadlift: 405, bench: 225, 'trap-bar-deadlift': 425 } },
-  { id: 'ath-2', name: 'Tyler Chen', group: 'Pitchers', maxes: { 'back-squat': 275, deadlift: 365, bench: 205, 'trap-bar-deadlift': 385 } },
-  { id: 'ath-3', name: 'Marcus Reed', group: 'Position', maxes: { 'back-squat': 355, deadlift: 455, bench: 265, 'trap-bar-deadlift': 475 } },
-];
