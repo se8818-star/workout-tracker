@@ -132,3 +132,10 @@ test('breaths are counted like reps but never loaded or added to rep totals', ()
   assert.equal(t.sets, 2);
   assert.equal(t.reps, 0);
 });
+
+test('an exercise programmed in kg rounds in kg and carries its unit into the session', () => {
+  const block = { deloadWeek: null, days: [{ name: 'A', items: [{ exerciseId: 'x', sets: 1, reps: 5, pct: 80, unit: 'kg' }] }] };
+  const s = calc.buildSession(block, 0, 0, { maxes: { x: 300 } }, { lb: 5, kg: 2.5, unit: 'lb' });
+  assert.equal(s.items[0].unit, 'kg');
+  assert.equal(Math.round(calc.toUnit(s.items[0].sets[0].weight, 'kg') * 10) / 10, 110);
+});

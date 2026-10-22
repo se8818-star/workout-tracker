@@ -58,10 +58,11 @@ export function setSetting(k, v) { db.settings[k] = v; save(); }
 
 // Weight helpers for this device's unit. Stored weights are always pounds.
 export const unit = () => db.settings.units || 'lb';
-export const showW = (lb) => { const v = toUnit(lb, unit()); return v == null ? null : Math.round(v * 10) / 10; };
-export const readW = (v) => fromUnit(v, unit());
-// The rounding step in pounds, so prescribed weights land on whole kg plates on a kg device.
-export const roundStep = () => (unit() === 'kg' ? (db.settings.roundingKg ?? 2.5) * LB_PER_KG : db.settings.rounding);
+// `u` overrides the device unit, e.g. the unit a coach programmed an exercise in.
+export const showW = (lb, u = unit()) => { const v = toUnit(lb, u); return v == null ? null : Math.round(v * 10) / 10; };
+export const readW = (v, u = unit()) => fromUnit(v, u);
+// Rounding per unit, so loads land on whole plates in whichever unit an exercise uses.
+export const roundStep = () => ({ lb: db.settings.rounding, kg: db.settings.roundingKg ?? 2.5, unit: unit() });
 
 export function all(kind) { return Object.values(db[kind]); }
 export function get(kind, id) { return db[kind][id] || null; }
@@ -139,7 +140,7 @@ export function startLog(athleteId, iso, plan) {
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
     // Prescribed numbers become targets; the boxes start empty for the athlete to fill.
-    entries: s.items.map((it) => ({ ...it, sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
+    entries: s.items.map((it) => ({ ...it, unit: it.unit || unit(), sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }

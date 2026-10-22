@@ -21,6 +21,13 @@ export const LB_PER_KG = 2.20462;
 export const toUnit = (lb, unit) => (lb == null ? null : unit === 'kg' ? lb / LB_PER_KG : lb);
 export const fromUnit = (v, unit) => (v == null ? null : unit === 'kg' ? v * LB_PER_KG : v);
 
+// Rounding is a step in pounds, or {lb, kg, unit} to round in the item's own unit.
+function stepFor(rounding, item) {
+  if (typeof rounding === 'number') return rounding;
+  const u = item.unit || rounding.unit || 'lb';
+  return u === 'kg' ? rounding.kg * LB_PER_KG : rounding.lb;
+}
+
 export function roundTo(x, step = 5) {
   if (!step) return x;
   return Math.round(x / step) * step;
@@ -61,7 +68,7 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
     return null;
   }
   if (isDeload(block, week)) weight *= 0.9;
-  return roundTo(weight, rounding);
+  return roundTo(weight, stepFor(rounding, item));
 }
 
 // How an item is measured: 'reps' (default), 'time' (seconds per set),
@@ -98,6 +105,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
         exerciseId: item.exerciseId,
         ...(item.warmup ? { warmup: true } : {}),
         measure,
+        ...(item.unit ? { unit: item.unit } : {}),
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',

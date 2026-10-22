@@ -198,6 +198,7 @@ function itemRow(item, di, ii, ex, label) {
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
   const prog = item.progression || { type: 'none' };
   const measure = measureOf(item);
+  const iu = item.unit || store.unit();
   const loadedEx = store.all('exercises').filter((e) => e.loaded).sort((a, b) => a.name.localeCompare(b.name));
   // Less-used settings stay folded away unless one is already in use.
   const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
@@ -220,9 +221,11 @@ function itemRow(item, di, ii, ex, label) {
     </div>`}
     ${x?.loaded && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
       <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
+      <div class="unit-field"><span>Unit</span><div class="seg unit-seg" role="group" aria-label="Weight unit">${['lb', 'kg'].map((v) =>
+        `<button class="${iu === v ? 'on' : ''}" data-action="itemUnit" data-v="${v}" aria-pressed="${iu === v}">${v}</button>`).join('')}</div></div>
       ${loadType === 'pct' ? `<label>%<input type="number" step="0.5" value="${item.pct}" data-action="itemField" data-k="pct"></label>
         <label>Max from<select data-action="itemField" data-k="maxFrom"><option value="">${esc(x.name)}</option>${loadedEx.filter((e) => e.id !== item.exerciseId).map((e) => `<option value="${e.id}" ${item.maxFrom === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : ''}
-      ${loadType === 'weight' ? `<label>${store.unit()}<input type="number" step="any" value="${store.showW(item.weight)}" data-action="itemField" data-k="weight"></label>` : ''}
+      ${loadType === 'weight' ? `<label>${iu}<input type="number" step="any" value="${store.showW(item.weight, iu)}" data-action="itemField" data-k="weight"></label>` : ''}
     </div>` : ''}
     <div class="item-notes">
       <label>Tempo<input type="text" placeholder="e.g. 3-1-1-0" value="${esc(item.tempo || '')}" data-action="itemField" data-k="tempo"></label>
@@ -237,7 +240,7 @@ function itemRow(item, di, ii, ex, label) {
           <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
           ${isCount(measure) ? `<option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ ${measure === 'breaths' ? 'breaths' : 'reps'}</option>` : ''}
           ${measure === 'time' ? `<option value="add_secs" ${prog.type === 'add_secs' ? 'selected' : ''}>+ seconds</option>` : ''}</select></label>
-        ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${(prog.type === 'add_weight' ? store.showW(prog.step) : prog.step) ?? ''}" data-action="progStep"></label>` : ''}
+        ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${(prog.type === 'add_weight' ? store.showW(prog.step, iu) : prog.step) ?? ''}" data-action="progStep"></label>` : ''}
         <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
       </div>
     </details>
@@ -268,6 +271,10 @@ export function blockEditor(root, { id }, query) {
   const day = Math.min(Number(query.get('day') || 0), Math.max(0, b.days.length - 1));
   let other = query.get('with') === null || query.get('with') === '' ? null : Number(query.get('with'));
   if (other === day || other >= b.days.length) other = null;
+  // Each exercise keeps the unit the coach programmed it in; athletes start there.
+  let stamped = false;
+  for (const d of b.days) for (const it of d.items) if (!it.unit) { it.unit = store.unit(); stamped = true; }
+  if (stamped) store.put('blocks', b);
   const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
   const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('');
   const dayCard = (di) => {
@@ -320,7 +327,6 @@ export function blockEditor(root, { id }, query) {
       <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
       <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
       <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
-      <div class="field-row"><span>Weights in</span>${unitSeg(store.unit())}</div>
     </section>
     <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
     <nav class="day-tabs" aria-label="Days">
@@ -384,7 +390,7 @@ export function blockEditor(root, { id }, query) {
       const k = el.dataset.k;
       const it = b.days[di].items[ii];
       if (['note', 'tempo', 'group', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
-      else if (k === 'weight') it[k] = store.readW(num(el.value));
+      else if (k === 'weight') it[k] = store.readW(num(el.value), it.unit);
       else it[k] = num(el.value);
       save(false);
     },
@@ -393,11 +399,11 @@ export function blockEditor(root, { id }, query) {
       const it = b.days[di].items[ii];
       delete it.pct; delete it.weight;
       if (el.value === 'pct') it.pct = 70;
-      const kg = store.unit() === 'kg';
-      if (el.value === 'weight') it.weight = kg ? store.readW(20) : 45;
+      const kg = it.unit === 'kg';
+      if (el.value === 'weight') it.weight = kg ? store.readW(20, 'kg') : 45;
       // Keep the weekly rule meaningful for the new load type.
       const pt = it.progression?.type;
-      if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: kg ? store.readW(2.5) : 5 };
+      if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: kg ? store.readW(2.5, 'kg') : 5 };
       if (el.value === 'pct' && pt === 'add_weight') it.progression = { type: 'add_pct', step: 2.5 };
       if (el.value === 'none' && (pt === 'add_pct' || pt === 'add_weight')) it.progression = undefined;
       save();
@@ -405,14 +411,15 @@ export function blockEditor(root, { id }, query) {
     progType: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
-      const defaults = { add_pct: 2.5, add_weight: store.unit() === 'kg' ? store.readW(2.5) : 5, add_reps: 1, add_secs: 5 };
+      const defaults = { add_pct: 2.5, add_weight: it.unit === 'kg' ? store.readW(2.5, 'kg') : 5, add_reps: 1, add_secs: 5 };
       it.progression = el.value === 'none' ? undefined : { type: el.value, step: defaults[el.value] };
       save();
     },
     progStep: (el) => {
       const { di, ii } = itemOf(el);
-      const prog = b.days[di].items[ii].progression;
-      prog.step = prog.type === 'add_weight' ? store.readW(num(el.value)) : num(el.value);
+      const it = b.days[di].items[ii];
+      const prog = it.progression;
+      prog.step = prog.type === 'add_weight' ? store.readW(num(el.value), it.unit) : num(el.value);
       save(false);
     },
     step: (el) => {
@@ -464,7 +471,7 @@ export function blockEditor(root, { id }, query) {
         root.querySelector(`.item[data-di="${di}"][data-ii="${at}"]`)?.scrollIntoView({ block: 'center' });
       }, { allowNew: true });
     },
-    setUnits: (el) => { store.setSetting('units', el.dataset.v); save(); },
+    itemUnit: (el) => { const { di, ii } = itemOf(el); b.days[di].items[ii].unit = el.dataset.v; save(); },
     warmLoad: (el) => {
       const di = Number(el.dataset.di);
       const w = store.get('blocks', el.value);
@@ -512,8 +519,9 @@ export function blockEditor(root, { id }, query) {
         const item = { exerciseId: x.id, sets: q.sets, reps: q.reps };
         for (const k of ['pct', 'rpe', 'progression']) if (q[k] != null) item[k] = q[k];
         // Typed weights are in this device's unit unless the line says lb or kg.
-        if (q.weight != null) item.weight = store.readW(q.weight);
-        if (q.progression?.type === 'add_weight') item.progression.step = fromUnit(q.progression.step, q.progUnit || store.unit());
+        item.unit = q.progUnit || store.unit();
+        if (q.weight != null) item.weight = store.readW(q.weight, item.unit);
+        if (q.progression?.type === 'add_weight') item.progression.step = fromUnit(q.progression.step, item.unit);
         b.days[di].items.push(item);
       }
       save();

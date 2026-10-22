@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, unitSeg, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, PATTERN_LABEL } from './ui.js';
 
 const today = () => toISO(new Date());
 
@@ -29,8 +29,8 @@ export function fmtSecs(n) {
   return n < 60 ? `${n} s` : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 }
 
-function targetText(set, measure) {
-  const w = store.showW(set.targetWeight ?? set.weight);
+function targetText(set, measure, u) {
+  const w = store.showW(set.targetWeight ?? set.weight, u);
   if (measure === 'time') {
     const t = fmtSecs(set.targetSecs ?? set.secs);
     return w && t ? `${w} × ${t}` : t;
@@ -110,11 +110,14 @@ export function today_(root, { id }, query) {
 function entryCard(log, entry, i, label) {
   const ex = store.get('exercises', entry.exerciseId) || { name: entry.exerciseId };
   const last = store.lastTime(log.athleteId, entry.exerciseId, log.date);
-  const units = store.unit();
+  // Each set shows its weight in its own unit: the one the coach programmed
+  // unless the athlete flipped that set.
+  const eu = entry.unit || store.unit();
+  const su = (s) => s.unit || eu;
   const measure = entry.measure || 'reps';
   const loaded = ex.loaded !== false && measure !== 'none' && measure !== 'breaths';
   const amount = (s) => (measure === 'time' ? fmtSecs(s.secs) : `${s.reps ?? ''}`);
-  const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${store.showW(s.weight)}×${amount(s)}` : amount(s)).join(', ')}` : '';
+  const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${store.showW(s.weight, eu)}×${amount(s)}` : amount(s)).join(', ')}` : '';
   // The box the athlete fills in: reps, breaths, seconds, or nothing for a check-off item.
   const k = measure === 'time' ? 'secs' : 'reps';
   const boxName = { time: 'Secs', breaths: 'Breaths' }[measure] || 'Reps';
@@ -126,8 +129,8 @@ function entryCard(log, entry, i, label) {
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
-      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure))}</span>
-      ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight) ?? ''}" placeholder="${store.showW(s.targetWeight) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
+      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s)))}</span>
+      ${loaded ? `<div class="field wfield"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight, su(s)) ?? ''}" placeholder="${store.showW(s.targetWeight, su(s)) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight in ${su(s)}, set ${j + 1}"><button class="unit-btn" data-action="setUnit" data-i="${i}" data-j="${j}" aria-label="Weight unit for set ${j + 1}: ${su(s)}. Tap to switch">${su(s)}</button></div>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
@@ -141,7 +144,7 @@ function entryCard(log, entry, i, label) {
     </header>
     ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
     ${ex.video ? `<a class="link small" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Watch demo</a>` : ''}
-    ${measure === 'none' ? '' : `<div class="set-head ${cols}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>${boxName}</span><span></span></div>`}
+    ${measure === 'none' ? '' : `<div class="set-head ${cols}"><span>Set</span><span>Target</span>${loaded ? '<span>Load</span>' : ''}<span>${boxName}</span><span></span></div>`}
     <div class="sets">${rows}</div>
     <div class="entry-foot">
       ${measure === 'none' ? '' : `<button class="link" data-action="addSet" data-i="${i}">+ Set</button>`}
@@ -177,7 +180,7 @@ export function session(root, { id, date }) {
     <header class="page-head">
       <a class="back" href="#/athlete/${id}?d=${date}">‹ ${fmtDate(date)}</a>
       <span class="kicker">${esc(block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
-      <div class="row between"><h1>${esc(log.name)}</h1><div class="row gap">${unitSeg(store.unit())}<button class="chip" data-action="switch">Switch</button></div></div>
+      <div class="row between"><h1>${esc(log.name)}</h1><button class="chip" data-action="switch">Switch</button></div>
     </header>
     ${log.entries.map((e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
@@ -198,6 +201,7 @@ export function session(root, { id, date }) {
 
   const rerender = () => { const y = window.scrollY; session(root, { id, date }); window.scrollTo(0, y); };
   const persist = () => store.saveLog(log);
+  const unitOf = (i, j) => log.entries[i].sets[j].unit || log.entries[i].unit || store.unit();
   const markEntry = (i) => root.querySelector(`#entry-${i}`)?.classList.toggle('complete', log.entries[i].sets.every((s) => s.done));
 
   bindActions(root, {
@@ -210,7 +214,7 @@ export function session(root, { id, date }) {
         if (s.secs == null) s.secs = s.targetSecs ?? null;
         if (s.weight == null) s.weight = s.targetWeight ?? null;
         const row = el.closest('.set');
-        for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = f === 'weight' ? store.showW(s[f]) : s[f]; }
+        for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = f === 'weight' ? store.showW(s[f], unitOf(el.dataset.i, el.dataset.j)) : s[f]; }
       }
       el.setAttribute('aria-pressed', s.done);
       el.closest('.set').classList.toggle('done', s.done);
@@ -220,14 +224,19 @@ export function session(root, { id, date }) {
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
       const v = el.value === '' ? null : Number(el.value);
-      s[el.dataset.k] = el.dataset.k === 'weight' ? store.readW(v) : v;
+      s[el.dataset.k] = el.dataset.k === 'weight' ? store.readW(v, unitOf(el.dataset.i, el.dataset.j)) : v;
       persist();
     },
-    setUnits: (el) => { store.setSetting('units', el.dataset.v); rerender(); },
+    // Flip one set between kg and lb. The stored weight doesn't change, only how it reads.
+    setUnit: (el) => {
+      const s = log.entries[el.dataset.i].sets[el.dataset.j];
+      s.unit = unitOf(el.dataset.i, el.dataset.j) === 'kg' ? 'lb' : 'kg';
+      persist(); rerender();
+    },
     addSet: (el) => {
       const sets = log.entries[el.dataset.i].sets;
       const last = sets[sets.length - 1] || {};
-      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, reps: null, secs: null, weight: null, done: false });
+      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, ...(last.unit ? { unit: last.unit } : {}), reps: null, secs: null, weight: null, done: false });
       persist(); rerender();
     },
     removeSet: (el) => { log.entries[el.dataset.i].sets.pop(); persist(); rerender(); },
@@ -255,7 +264,7 @@ export function session(root, { id, date }) {
     },
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addExercise: () => pickExerciseSheet((exId) => {
-      log.entries.push({ exerciseId: exId, note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
+      log.entries.push({ exerciseId: exId, unit: store.unit(), note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
     }),
     switch: () => switchSheet(id, date, (plan) => {
