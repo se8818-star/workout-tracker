@@ -123,3 +123,80 @@ export function stat(label, value, prev, unit = '') {
   }
   return `<div class="stat"><span class="stat-label">${esc(label)}</span><span class="stat-value">${fmt(value)}<small>${unit}</small></span>${delta}</div>`;
 }
+
+// Styled dropdowns. Each <select> stays in the page (hidden) and keeps its
+// value and change events, so the screens' code is unchanged; a button and a
+// menu in the app's style stand in front of it.
+const valueProp = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+
+function closeMenu() { $$('.dd-menu').forEach((m) => { m._btn?.setAttribute('aria-expanded', 'false'); m.remove(); }); }
+
+function openMenu(sel, btn) {
+  closeMenu();
+  const menu = document.createElement('div');
+  menu.className = 'dd-menu';
+  menu.setAttribute('role', 'listbox');
+  menu._btn = btn;
+  const opt = (o) => `<button type="button" role="option" class="dd-opt ${o.selected ? 'on' : ''}" data-v="${esc(o.value)}" aria-selected="${o.selected}" ${o.disabled ? 'disabled' : ''}>${esc(o.textContent)}</button>`;
+  menu.innerHTML = [...sel.children].map((c) => (c.tagName === 'OPTGROUP'
+    ? `<div class="dd-group">${esc(c.label)}</div>${[...c.children].map(opt).join('')}` : opt(c))).join('');
+  document.body.append(menu);
+  // Below the button, or above it when there isn't room.
+  const r = btn.getBoundingClientRect(), h = menu.offsetHeight, below = innerHeight - r.bottom;
+  menu.style.minWidth = `${r.width}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${below >= h + 8 || below > r.top ? r.bottom + 4 : r.top - h - 4}px`;
+  menu.style.maxHeight = `${Math.max(160, (below >= h + 8 || below > r.top ? below : r.top) - 12)}px`;
+  btn.setAttribute('aria-expanded', 'true');
+  (menu.querySelector('.dd-opt.on') || menu.querySelector('.dd-opt'))?.focus();
+  menu.addEventListener('click', (e) => {
+    const o = e.target.closest('.dd-opt');
+    if (!o) return;
+    closeMenu(); btn.focus();
+    if (o.dataset.v === sel.value) return;
+    sel.value = o.dataset.v;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  menu.addEventListener('keydown', (e) => {
+    const opts = $$('.dd-opt:not([disabled])', menu), i = opts.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]?.focus(); }
+    if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeMenu(); btn.focus(); }
+  });
+}
+
+function enhance(sel) {
+  sel._dd = true;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `dd-btn ${sel.className}`;
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  const name = sel.getAttribute('aria-label') || sel.closest('label')?.firstChild?.textContent?.trim();
+  const sync = () => {
+    btn.innerHTML = `<span class="dd-val">${esc(sel.selectedOptions[0]?.textContent || '')}</span><span class="dd-caret" aria-hidden="true"></span>`;
+    if (name) btn.setAttribute('aria-label', `${name}: ${sel.selectedOptions[0]?.textContent || ''}`);
+    btn.disabled = sel.disabled;
+  };
+  // Code that sets select.value directly (e.g. resetting after Cancel) updates the button too.
+  Object.defineProperty(sel, 'value', { get() { return valueProp.get.call(this); }, set(v) { valueProp.set.call(this, v); sync(); }, configurable: true });
+  sel.addEventListener('change', sync);
+  sel.classList.add('dd-native');
+  sel.tabIndex = -1;
+  sel.after(btn);
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (btn.getAttribute('aria-expanded') === 'true') closeMenu(); else openMenu(sel, btn);
+  });
+  btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); openMenu(sel, btn); } });
+  sync();
+}
+
+export function styledSelects() {
+  const run = () => document.querySelectorAll('select:not(.dd-native)').forEach((s) => { if (!s._dd) enhance(s); });
+  run();
+  new MutationObserver(run).observe(document.body, { childList: true, subtree: true });
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.dd-menu, .dd-btn')) closeMenu(); });
+  window.addEventListener('resize', closeMenu);
+  window.addEventListener('scroll', (e) => { if (!e.target.closest?.('.dd-menu')) closeMenu(); }, true);
+  window.addEventListener('hashchange', closeMenu);
+}
