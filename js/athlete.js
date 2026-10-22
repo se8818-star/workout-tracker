@@ -153,7 +153,7 @@ function entryCard(log, entry, i, label) {
       <span class="order">${label}</span>
       <div class="entry-title"><h3>${esc(ex.name)}</h3>
         ${tags.length ? `<p class="tags">${esc(tags.join(' · '))}</p>` : ''}
-        ${lastTxt ? `<p class="last">${esc(lastTxt)}</p>` : ''}</div>
+        ${lastTxt ? `<button class="last" data-action="history" data-i="${i}" aria-label="${esc(lastTxt)}. See all past sets">${esc(lastTxt)} <b>· History ›</b></button>` : ''}</div>
       <button class="chip" data-action="swap" data-i="${i}">Swap</button>
     </header>
     ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
@@ -282,6 +282,7 @@ export function session(root, { id, date, warm = false }) {
       toast(prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : warm ? 'Warmup saved' : 'Workout saved');
       location.hash = `#/athlete/${id}?d=${date}`;
     },
+    history: (el) => historySheet(log, log.entries[el.dataset.i]),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addVideo: (el) => {
       if (!videosEnabled()) return toast('Videos need the online app, not the demo.');
@@ -364,6 +365,24 @@ export function videoSheet(path) {
     <p class="muted small">Videos are kept for ${VIDEO_DAYS} days.</p>`, async (w) => {
     try { w.querySelector('video').src = await videoUrl(path); } catch (e) { toast(`Couldn't load the video: ${e.message}`); }
   });
+}
+
+// Everything the athlete has logged for an exercise, newest first, so they
+// can pick a weight mid-workout.
+function historySheet(log, entry) {
+  const ex = store.get('exercises', entry.exerciseId) || { name: entry.exerciseId };
+  const past = store.exerciseHistory(log.athleteId, entry.exerciseId, log.date);
+  const u = entry.unit || store.unit();
+  const amount = (s, m) => (m === 'time' ? fmtSecs(s.secs) : m === 'breaths' ? `${s.reps ?? ''} breaths` : `${s.reps ?? ''}`);
+  const setText = (s, h) => (s.weight ? `${store.showW(s.weight, s.unit || h.unit || u)} ${s.unit || h.unit || u} × ${amount(s, h.measure)}` : amount(s, h.measure) || 'Done');
+  // Heaviest set and estimated max, shown in this workout's unit.
+  let best = null;
+  for (const h of past) for (const s of h.sets) if (s.weight && s.reps && (!best || e1rm(s.weight, s.reps) > e1rm(best.weight, best.reps))) best = s;
+  const html = `${best ? `<div class="hist-best"><span>Best set</span><b>${store.showW(best.weight, u)} ${u} × ${best.reps}</b><span>Est. max ${fmt(store.showW(e1rm(best.weight, best.reps), u))} ${u}</span></div>` : ''}
+    <ol class="hist">${past.map((h) => `<li><div class="hist-date">${esc(fmtDate(h.date, { weekday: 'short', month: 'short', day: 'numeric' }))}</div>
+      <ol class="hist-sets">${h.sets.map((s) => `<li>${esc(setText(s, h))}</li>`).join('')}</ol>
+      ${h.note ? `<p class="muted small">${esc(h.note)}</p>` : ''}</li>`).join('')}</ol>`;
+  sheet(`${ex.name} history`, html);
 }
 
 function swapSheet(log, i, done) {
