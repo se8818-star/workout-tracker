@@ -7,12 +7,13 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import * as store from './store.js';
 import { esc, bindActions, toast, $ } from './ui.js';
 
-export const cloudEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+export const cloudEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && !new URLSearchParams(location.search).has('demo');
 
 let sb = null;          // supabase client
 let user = null;
 let membership = null;  // { team_id, role, athlete_id, team: { name, join_code } }
 let ready = false;
+let loadError = false;
 let rerender = () => {};
 let pushTimer = null;
 
@@ -21,10 +22,17 @@ export const teamInfo = () => membership;
 export async function startSync(render) {
   rerender = render;
   if (!cloudEnabled) return;
-  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
-  sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true } });
-  const { data } = await sb.auth.getSession();
-  user = data.session?.user || null;
+  try {
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
+    sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true } });
+    const { data } = await sb.auth.getSession();
+    user = data.session?.user || null;
+  } catch (e) {
+    // First visit with no connection: nothing cached yet to sign in with.
+    console.warn(e);
+    loadError = true; ready = true; rerender();
+    return;
+  }
   sb.auth.onAuthStateChange((_e, session) => { user = session?.user || null; });
   if (user) await loadMembership();
   ready = true;
@@ -40,9 +48,15 @@ export async function startSync(render) {
 
 async function loadMembership() {
   const { data, error } = await sb.from('members').select('team_id, role, athlete_id, teams(name, join_code)').eq('user_id', user.id).limit(1);
-  if (error) { console.warn(error); return; }
+  if (error) {
+    // Offline in the gym: keep using the team we last saw so logging still works.
+    console.warn(error);
+    membership = store.settings().membership || null;
+    return;
+  }
   const m = data?.[0];
-  membership = m ? { ...m, team: m.teams } : null;
+  membership = m ? { team_id: m.team_id, role: m.role, athlete_id: m.athlete_id, team: m.teams } : null;
+  store.setSetting('membership', membership);
   if (membership) {
     store.setSetting('me', membership.role === 'coach' ? { role: 'coach' } : { role: 'athlete', athleteId: membership.athlete_id });
   }
@@ -101,6 +115,7 @@ async function pull() {
 export function gate(root) {
   if (!cloudEnabled) return false;
   if (!ready) { root.innerHTML = '<p class="empty">Loading…</p>'; return true; }
+  if (loadError) { root.innerHTML = '<p class="empty">Couldn\'t reach the server. Check your connection and reload.</p>'; return true; }
   if (!user) { loginView(root); return true; }
   if (!membership) { teamView(root); return true; }
   return false;
@@ -108,7 +123,7 @@ export function gate(root) {
 
 function loginView(root) {
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1><p class="muted">Sign in with your email. We'll send you a 6-digit code.</p></header>
+    <header class="page-head hero"><h1>Training log</h1><p class="muted">Sign in with your email. We'll send you a sign-in link (or a 6-digit code).</p></header>
     <section class="card form">
       <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email"></label>
       <button class="btn wide" data-action="send">Send code</button>
@@ -124,7 +139,7 @@ function loginView(root) {
       const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
       if (error) return toast(error.message);
       $('#lg-code', root).hidden = false;
-      toast('Code sent. Check your email.');
+      toast('Check your email: tap the link, or type the code here.');
     },
     verify: async () => {
       const email = $('#lg-email', root).value.trim();
