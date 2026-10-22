@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, sessionEntries, refreshEntries, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -151,8 +151,7 @@ export function startLog(athleteId, iso, plan) {
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
-    // Prescribed numbers become targets; the boxes start empty for the athlete to fill.
-    entries: s.items.map((it) => ({ ...it, unit: it.unit || unit(), sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
+    entries: sessionEntries(s, unit()),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }
@@ -164,9 +163,22 @@ export function startWarmupLog(athleteId, iso, w) {
   return put('logs', {
     id: `${logId(athleteId, iso)}:warmup`, athleteId, date: iso, warmup: true,
     assignmentId: w.assignment.id, blockId: w.block.id, week: 0, dayIndex: 0, name: w.block.name,
-    entries: s.items.map((it) => ({ ...it, unit: it.unit || unit(), sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
+    entries: sessionEntries(s, unit()),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
+}
+
+// Pick up coach edits made to the block since this log was started (see
+// refreshEntries). Finished logs are history and stay as they were.
+export function refreshLog(log) {
+  const block = log && !log.finished && get('blocks', log.blockId);
+  if (!block) return log;
+  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep());
+  if (!s) return log;
+  const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
+  const name = log.warmup ? log.name : s.name;
+  if (name === log.name && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
+  return put('logs', { ...log, name, entries });
 }
 
 export function saveLog(log) {

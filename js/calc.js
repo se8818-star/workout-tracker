@@ -71,6 +71,16 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
   return roundTo(weight, stepFor(rounding, item));
 }
 
+// The week's % of max, as the athlete would see it when they have no max on
+// file to turn it into a weight.
+export function prescribedPct(item, week, block) {
+  if (item.pct == null) return null;
+  const prog = item.progression || {};
+  let pct = item.pct + (prog.type === 'add_pct' ? (prog.step || 0) * week : 0);
+  if (isDeload(block, week)) pct *= 0.9;
+  return Math.round(pct * 2) / 2;
+}
+
 // How an item is measured: 'reps' (default), 'time' (seconds per set),
 // 'breaths' (a count like reps, kept in the reps field, never loaded), or
 // 'none' (no sets or reps; the athlete just checks it off, e.g. a warmup).
@@ -99,7 +109,9 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
       const measure = measureOf(item);
       const reps = isCount(measure) ? prescribedReps(item, week) : null;
       const secs = measure === 'time' ? prescribedSecs(item, week) : null;
-      const weight = measure === 'none' || measure === 'breaths' ? null : prescribedWeight(item, athlete, week, block, rounding);
+      const noLoad = measure === 'none' || measure === 'breaths';
+      const weight = noLoad ? null : prescribedWeight(item, athlete, week, block, rounding);
+      const pct = noLoad ? null : prescribedPct(item, week, block);
       const n = measure === 'none' ? 1 : prescribedSets(item, block, week);
       return {
         exerciseId: item.exerciseId,
@@ -109,10 +121,49 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',
-        sets: Array.from({ length: n }, () => ({ reps, secs, weight, rpe: item.rpe ?? null, done: false })),
+        sets: Array.from({ length: n }, () => ({ reps, secs, weight, ...(pct != null ? { pct } : {}), rpe: item.rpe ?? null, done: false })),
       };
     }),
   };
+}
+
+// Turn a built session into log entries: prescribed numbers become targets
+// and the boxes start empty for the athlete to fill.
+export function sessionEntries(s, unit) {
+  return s.items.map((it) => ({ ...it, unit: it.unit || unit, sets: it.sets.map((x) => ({
+    targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, ...(x.pct != null ? { targetPct: x.pct } : {}),
+    rpe: x.rpe, reps: null, secs: null, weight: null, done: false,
+  })) }));
+}
+
+const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit;
+const untouchedEntry = (e) => !e.addedByAthlete && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
+
+// A day's log is made the first time the athlete opens it, but the coach can
+// still edit the block after that. Bring the block's current plan into the
+// log: a log nobody has written in yet is rebuilt outright; otherwise each
+// set the athlete hasn't touched picks up the new targets, and anything they
+// logged stays as it is.
+export function refreshEntries(entries, fresh) {
+  if (entries.every(untouchedEntry)) return fresh;
+  const used = new Set();
+  return entries.map((e) => {
+    const k = fresh.findIndex((f, i) => !used.has(i) && (f.exerciseId === e.exerciseId || f.exerciseId === e.swappedFrom));
+    if (e.addedByAthlete || k < 0) return e;
+    used.add(k);
+    const f = fresh[k];
+    if (untouchedEntry(e)) return { ...e, ...f };
+    return {
+      ...e, note: f.note, tempo: f.tempo, group: f.group, measure: f.measure, unit: f.unit,
+      sets: e.sets.map((s, j) => {
+        const t = f.sets[Math.min(j, f.sets.length - 1)];
+        if (!t || s.done) return s;
+        const { targetPct, ...rest } = s;
+        return { ...rest, targetReps: t.targetReps, targetSecs: t.targetSecs, targetWeight: e.swappedFrom ? null : t.targetWeight,
+          ...(t.targetPct != null && !e.swappedFrom ? { targetPct: t.targetPct } : {}), rpe: t.rpe };
+      }),
+    };
+  });
 }
 
 function setsOf(entry, onlyDone) {

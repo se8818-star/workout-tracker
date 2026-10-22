@@ -154,3 +154,30 @@ test('a warmup block builds warmup entries', () => {
   const w = { kind: 'warmup', weeks: 1, days: [{ name: 'Warmup', items: [{ exerciseId: 'x', sets: 1, reps: 10 }] }] };
   assert.equal(calc.buildSession(w, 0, 0, { maxes: {} }).items[0].warmup, true);
 });
+
+test('a % of max with no max on file still reaches the athlete as a %', () => {
+  const block = { deloadWeek: 3, days: [{ name: 'A', items: [{ exerciseId: 'x', sets: 1, reps: 5, pct: 70, progression: { type: 'add_pct', step: 2.5 } }] }] };
+  const s = calc.buildSession(block, 0, 1, { maxes: {} });
+  assert.equal(s.items[0].sets[0].weight, null);
+  assert.equal(s.items[0].sets[0].pct, 72.5);
+  assert.equal(calc.sessionEntries(s, 'lb')[0].sets[0].targetPct, 72.5);
+  assert.equal(calc.prescribedPct(block.days[0].items[0], 3, block), 70);
+});
+
+test('coach edits after a day was opened reach the athlete without touching logged sets', () => {
+  const block = { deloadWeek: null, days: [{ name: 'A', items: [{ exerciseId: 'x', sets: 2, reps: null }, { exerciseId: 'y', sets: 2, reps: 8 }] }] };
+  const before = calc.sessionEntries(calc.buildSession(block, 0, 1, { maxes: {} }), 'lb');
+  block.days[0].items[0] = { exerciseId: 'x', sets: 3, reps: 10, weight: 100, progression: { type: 'add_weight', step: 5 } };
+  block.days[0].items[1].weight = 50;
+  const fresh = calc.sessionEntries(calc.buildSession(block, 0, 1, { maxes: {} }), 'lb');
+  // Opened but nothing logged: the log is rebuilt from the block.
+  const a = calc.refreshEntries(before, fresh);
+  assert.deepEqual(a[0].sets.map((s) => [s.targetReps, s.targetWeight]), [[10, 105], [10, 105], [10, 105]]);
+  // One set logged: it stays; the rest pick up the new targets.
+  before[1].sets[0] = { ...before[1].sets[0], reps: 8, weight: 40, done: true };
+  const b = calc.refreshEntries(before, fresh);
+  assert.equal(b[0].sets.length, 3);
+  assert.equal(b[0].sets[0].targetWeight, 105);
+  assert.deepEqual([b[1].sets[0].weight, b[1].sets[0].targetWeight], [40, null]);
+  assert.equal(b[1].sets[1].targetWeight, 50);
+});
