@@ -1,0 +1,9 @@
+// Cloudflare deploy settings. The app is plain static files, so this only
+// tells Cloudflare which folder to serve; .assetsignore keeps non-app files out.
+{
+  "name": "workout-tracker",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "."
+  }
+}
