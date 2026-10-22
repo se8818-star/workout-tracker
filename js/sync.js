@@ -133,50 +133,91 @@ const PENDING = 'wt-pending-join';
 const readPending = () => { try { return JSON.parse(localStorage.getItem(PENDING)) || null; } catch { return null; } };
 const writePending = (v) => { try { if (v) localStorage.setItem(PENDING, JSON.stringify(v)); else localStorage.removeItem(PENDING); } catch { /* private mode */ } };
 
-// The first page: sign in to an existing account, or create one and join a
-// team with the coach's code. Both use the emailed sign-in code.
+// A new password waits here (memory only, never stored) until the emailed code
+// is verified, then it's saved to the account.
+let pendingPassword = '';
+const MIN_PASSWORD = 8;
+
+// The first page. Three modes:
+//   signin: email + password, the everyday way in.
+//   code:   email a sign-in code (forgot password, or an account made before
+//           passwords); can set a new password at the same time.
+//   create: name, email, password, team code; the emailed code confirms the
+//           email, then the account gets its password and joins the team.
 function loginView(root, mode = 'signin', sentTo = '') {
   const create = mode === 'create';
   const pending = readPending();
-  const codeStep = sentTo ? `
-      <p class="muted">We emailed ${create ? 'a sign-in code' : 'a sign-in link and code'} to <b>${esc(sentTo)}</b>.${create ? '' : ' Tap the link, or type the code here.'}</p>
+  const tab = (v, label) => `<button class="${(v === 'create') === create ? 'on' : ''}" role="tab" aria-selected="${(v === 'create') === create}" data-action="mode" data-v="${v}">${label}</button>`;
+  const emailField = `<label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>`;
+  const codeStep = `
+      <p class="muted">We emailed a sign-in code to <b>${esc(sentTo)}</b>.</p>
       <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
+      ${mode === 'code' || (create && !pendingPassword) ? `<label class="field-row"><span>${create ? 'Password' : 'New password'}</span><input type="password" id="lg-newpw" autocomplete="new-password" placeholder="${create ? '' : 'Optional, '}${MIN_PASSWORD}+ characters"></label>` : ''}
       <button class="btn wide" data-action="verify">${create ? 'Create account' : 'Sign in'}</button>
-      <button class="link" data-action="restart">Use a different email</button>` : '';
-  root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1></header>
-    <div class="seg auth-tabs" role="tablist">
-      <button class="${create ? '' : 'on'}" role="tab" aria-selected="${!create}" data-action="mode" data-v="signin">Sign in</button>
-      <button class="${create ? 'on' : ''}" role="tab" aria-selected="${create}" data-action="mode" data-v="create">Create account</button>
-    </div>
-    <section class="card form">
-      ${create ? `
+      <button class="link" data-action="restart">Use a different email</button>`;
+  let body;
+  if (create) {
+    body = `
         <p class="muted">New here? Ask your coach for the 6-letter team code.</p>
         <label class="field-row"><span>Your name</span><input id="lg-name" autocomplete="name" value="${esc(pending?.name || '')}"></label>
-        <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>
+        ${emailField}
+        <label class="field-row"><span>Password</span><input type="password" id="lg-pw" autocomplete="new-password" placeholder="${MIN_PASSWORD}+ characters"></label>
         <label class="field-row"><span>Team code</span><input id="lg-team" maxlength="6" autocapitalize="characters" value="${esc(pending?.code || '')}"></label>
         <label class="field-row"><span>Group</span><input id="lg-group" placeholder="e.g. Pitchers (optional)" value="${esc(pending?.group || '')}"></label>
-        ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}`
-      : `<p class="muted">Welcome back. We'll email you a sign-in link and code. Tap the link, or type the code here.</p>
-        <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>`}
-      ${sentTo ? codeStep : `<button class="btn wide" data-action="send">Send code</button>`}
-    </section>`;
+        ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}
+        ${sentTo ? codeStep : `<p class="muted small">We'll email you a code once to confirm it's you.</p><button class="btn wide" data-action="send">Continue</button>`}`;
+  } else if (mode === 'code') {
+    body = `
+        <p class="muted">Forgot your password, or never set one? We'll email you a sign-in code, and you can choose a new password.</p>
+        ${emailField}
+        ${sentTo ? codeStep : '<button class="btn wide" data-action="send">Email me a code</button>'}
+        <button class="link" data-action="mode" data-v="signin">Back to password sign-in</button>`;
+  } else {
+    body = `
+        ${emailField}
+        <label class="field-row"><span>Password</span><input type="password" id="lg-pw" autocomplete="current-password"></label>
+        <button class="btn wide" data-action="passwordIn">Sign in</button>
+        <button class="link" data-action="mode" data-v="code">Forgot password? Sign in with an email code</button>`;
+  }
+  root.innerHTML = `
+    <header class="page-head hero"><h1>Training log</h1></header>
+    <div class="seg auth-tabs" role="tablist">${tab('signin', 'Sign in')}${tab('create', 'Create account')}</div>
+    <section class="card form">${body}</section>`;
   if (sentTo) $('#lg-otp', root)?.focus();
+  const finish = async () => {
+    await loadMembership();
+    location.reload();
+  };
   bindActions(root, {
-    mode: (el) => loginView(root, el.dataset.v),
+    mode: (el) => { pendingPassword = ''; loginView(root, el.dataset.v); },
     restart: () => loginView(root, mode),
+    passwordIn: async () => {
+      const email = $('#lg-email', root).value.trim();
+      const password = $('#lg-pw', root).value;
+      if (!email || !password) return toast('Enter your email and password');
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) {
+        if (/invalid login/i.test(error.message)) return toast('Wrong email or password. No password yet? Tap "Forgot password".');
+        return toast(error.message);
+      }
+      user = data.user;
+      await finish();
+    },
     send: async () => {
       const email = $('#lg-email', root).value.trim();
       if (!email) return toast('Enter your email');
       if (create) {
         const name = $('#lg-name', root).value.trim();
         const code = $('#lg-team', root).value.trim().toUpperCase();
+        const password = $('#lg-pw', root).value;
         if (!name) return toast('Enter your name');
+        if (password.length < MIN_PASSWORD) return toast(`Pick a password with at least ${MIN_PASSWORD} characters`);
         if (!code) return toast('Enter the team code from your coach');
         // Check the code before emailing, so a typo doesn't make an account with no team.
         const { data: team, error: teamErr } = await sb.rpc('team_for_code', { code });
         if (!teamErr && !team) return toast('No team with that code. Check it with your coach.');
         writePending({ name, code, group: $('#lg-group', root).value.trim(), team: team || '' });
+        pendingPassword = password;
       }
       const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: create } });
       if (error) {
@@ -188,17 +229,26 @@ function loginView(root, mode = 'signin', sentTo = '') {
     verify: async () => {
       // Keep digits only: pasted codes often carry spaces. Supabase can be set to 6-10 digits.
       const token = $('#lg-otp', root).value.replace(/\D/g, '');
+      // The app may have been closed while the athlete fetched the email; then
+      // the password is asked for again here.
+      const newPw = (create && pendingPassword) || $('#lg-newpw', root)?.value || '';
+      if (create && !newPw) return toast('Pick a password');
+      if (newPw && newPw.length < MIN_PASSWORD) return toast(`Pick a password with at least ${MIN_PASSWORD} characters`);
       const { data, error } = await sb.auth.verifyOtp({ email: sentTo, token, type: 'email' });
       if (error) return toast(error.message);
       user = data.user;
+      if (newPw) {
+        const r = await sb.auth.updateUser({ password: newPw });
+        if (r.error) toast(`Signed in, but the password wasn't saved: ${r.error.message}. Set it on the More page.`);
+        pendingPassword = '';
+      }
       const join = create && readPending();
       if (join) {
         const r = await sb.rpc('join_team', { code: join.code, athlete_name: join.name, athlete_group: join.group });
         if (r.error) toast(r.error.message);
         else writePending(null);
       }
-      await loadMembership();
-      location.reload();
+      await finish();
     },
   });
 }
@@ -245,6 +295,13 @@ function teamView(root) {
 export async function removeAthleteLogin(athleteId) {
   if (!sb || !membership) return;
   const { error } = await sb.rpc('remove_athlete', { t: membership.team_id, aid: athleteId });
+  if (error) throw error;
+}
+
+// Set or change the signed-in account's password (More page).
+export async function setPassword(password) {
+  if (!sb) return;
+  const { error } = await sb.auth.updateUser({ password });
   if (error) throw error;
 }
 

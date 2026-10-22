@@ -4,7 +4,7 @@ import * as store from './store.js';
 import * as athleteViews from './athlete.js';
 import * as coachViews from './coach.js';
 import { esc, bindActions, toast } from './ui.js';
-import { startSync, gate, cloudEnabled, teamInfo, signout } from './sync.js';
+import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
 
 store.load({ cloud: cloudEnabled });
 
@@ -109,6 +109,10 @@ function settingsView(root) {
       <h3>Put it on your phone</h3>
       <p class="muted">iPhone: open this page in Safari, tap Share, then "Add to Home Screen". Android: Chrome menu, then "Install app". It then opens like a normal app and works without signal.</p>
     </section>
+    ${cloudEnabled ? `<section class="card form"><h3>Password</h3>
+      <p class="muted small">Sign in with your email and this password. Forgot it? Use "Sign in with an email code" on the sign-in page.</p>
+      <label class="field-row"><span>New password</span><input type="password" id="set-pw" autocomplete="new-password" placeholder="8+ characters"></label>
+      <button class="btn ghost wide" data-action="savePassword">Save password</button></section>` : ''}
     <section class="card">
       <button class="btn ghost wide" data-action="switchUser">${cloudEnabled ? 'Sign out' : 'Switch user'}</button>
       <button class="btn ghost wide" data-action="export">Export all data (JSON)</button>
@@ -117,6 +121,11 @@ function settingsView(root) {
   bindActions(root, {
     units: (el) => { store.setSetting('units', el.value); settingsView(root); },
     rounding: (el) => store.setSetting(s.units === 'kg' ? 'roundingKg' : 'rounding', Number(el.value) || 0),
+    savePassword: async () => {
+      const pw = root.querySelector('#set-pw').value;
+      if (pw.length < 8) return toast('Use at least 8 characters');
+      try { await setPassword(pw); root.querySelector('#set-pw').value = ''; toast('Password saved'); } catch (e) { toast(e.message); }
+    },
     switchUser: () => { if (cloudEnabled) return signout(); store.setSetting('me', null); location.hash = '#/'; },
     export: () => {
       const data = Object.fromEntries(store.KINDS.map((k) => [k, store.all(k)]));
