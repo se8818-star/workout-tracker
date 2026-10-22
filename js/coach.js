@@ -176,7 +176,7 @@ function stepper(label, k, value, min, step = 1) {
 
 const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['none', 'No sets']];
 
-function itemRow(item, di, ii, ex) {
+function itemRow(item, di, ii, ex, label) {
   const x = ex[item.exerciseId];
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
   const prog = item.progression || { type: 'none' };
@@ -186,7 +186,7 @@ function itemRow(item, di, ii, ex) {
   const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
   return `<div class="item" data-di="${di}" data-ii="${ii}">
     <div class="item-top">
-      <span class="item-n">${item.group ? esc(item.group) : ii + 1}</span>
+      <span class="item-n">${esc(label)}</span>
       <button class="item-name" data-action="itemPick" title="Change exercise">${esc(x?.name || item.exerciseId)}</button>
       ${x?.contactsPerRep ? `<span class="pill">${x.contactsPerRep}c/rep · T${x.plyoTier}</span>` : ''}
       <span class="spacer"></span>
@@ -263,7 +263,18 @@ export function blockEditor(root, { id }, query) {
           </div>
         </div>
         <p class="muted small day-tot" data-di="${di}">${dayLine(dayTots[di])}</p>
-        ${d.items.map((it, ii) => itemRow(it, di, ii, ex)).join('')}
+        <div class="sec warm-sec">
+          <h4>Warmup</h4>
+          ${d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('')}
+          <div class="row gap wrap">
+            <button class="chip" data-action="itemAdd" data-di="${di}" data-warm="1">+ Warmup exercise</button>
+            ${d.items.some((x) => x.warmup) && b.days.length > 1 ? `<button class="chip" data-action="warmCopy" data-di="${di}">Copy warmup to other days</button>` : ''}
+          </div>
+        </div>
+        <div class="sec">
+          <h4>Workout</h4>
+          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length)))).join('')}
+        </div>
         <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
         <details class="quick-wrap"><summary>Or type a list</summary>
           <div class="quick">
@@ -403,14 +414,27 @@ export function blockEditor(root, { id }, query) {
     },
     itemAdd: (el) => {
       const di = Number(el.dataset.di);
+      const warm = Boolean(el.dataset.warm);
       pickExerciseSheet((exId) => {
-        b.days[di].items.push({ exerciseId: exId, sets: 3, reps: 8 });
+        const a = b.days[di].items;
+        // Warmup exercises stay together at the top of the day.
+        const at = warm ? a.filter((x) => x.warmup).length : a.length;
+        a.splice(at, 0, warm ? { exerciseId: exId, warmup: true, sets: 1, reps: 10 } : { exerciseId: exId, sets: 3, reps: 8 });
         save();
-        root.querySelector(`.item[data-di="${di}"][data-ii="${b.days[di].items.length - 1}"]`)?.scrollIntoView({ block: 'center' });
+        root.querySelector(`.item[data-di="${di}"][data-ii="${at}"]`)?.scrollIntoView({ block: 'center' });
       }, { allowNew: true });
     },
-    itemUp: (el) => { const { di, ii } = itemOf(el); if (ii > 0) { const a = b.days[di].items; [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]]; save(); } },
-    itemDown: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii < a.length - 1) { [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]]; save(); } },
+    warmCopy: (el) => {
+      const di = Number(el.dataset.di);
+      const warm = b.days[di].items.filter((x) => x.warmup);
+      if (!confirm(`Replace the warmup on the other ${b.days.length - 1} day(s) with this one?`)) return;
+      b.days.forEach((d, i) => { if (i !== di) d.items = [...structuredClone(warm), ...d.items.filter((x) => !x.warmup)]; });
+      save();
+      toast('Warmup copied to every day');
+    },
+    // Moves stay inside the item's own section (warmup or workout).
+    itemUp: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii > 0 && !a[ii - 1].warmup === !a[ii].warmup) { [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]]; save(); } },
+    itemDown: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii < a.length - 1 && !a[ii + 1].warmup === !a[ii].warmup) { [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]]; save(); } },
     itemDel: (el) => { const { di, ii } = itemOf(el); b.days[di].items.splice(ii, 1); save(); },
     quickAdd: (el) => {
       const di = Number(el.dataset.di);

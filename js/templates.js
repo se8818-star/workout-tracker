@@ -5,26 +5,33 @@
 const X = (id, name, pattern, body, loaded = true) => ({ id, name, pattern, body, loaded, alts: [] });
 
 // RIR (reps in reserve) maps onto the app's RPE field: RIR 0 = RPE 10.
-const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo, measure } = {}) => {
+const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo, measure, secs } = {}) => {
   const lines = [note, [range && `Reps ${range}`, rir != null && `RIR ${rir}`, rest && `Rest ${rest}`].filter(Boolean).join(' · ')].filter(Boolean);
   const item = { exerciseId, sets, reps };
   if (rir != null) item.rpe = 10 - (rir === '1/0' ? 0.5 : Number(rir));
   if (tempo) item.tempo = tempo;
   if (measure) item.measure = measure;
+  if (secs != null) item.secs = secs;
   if (lines.length) item.note = lines.join('\n');
   return item;
 };
-
-const WARMUP_NOTE = 'Foam roll: IT band/TFL, quads, hip flexors, hamstrings, adductors, lats, pecs, T-spine, feet (baseball). '
-  + 'Activation: 8 kg KB 90-90 hip switches 5/side, two-arm hangs, Jefferson curls with 6 deep breaths. '
-  + 'Then: push-up to down dog with toe touch 5/side, band-assisted calf hops x100, scap pull-ups x10, split stance pulses 50/side, '
-  + 'prone shoulder ER 3 x 3 s hold (right arm), bowler squats with overhead reach 6/side, half-kneeling T-spine rotation 8/side, 12 kg KB Cossack squats 5/side.';
 
 const ARM_CUE = 'Drive your elbow down to your hip, not shrugging up & letting your upper back takeover. Keep your arm close & adducted to your torso';
 const HOLD_3 = '3 second hold at the fully stretched and extended position on every rep.';
 
 const FALL_2026_EXERCISES = [
-  X('warmup', 'Warmup (foam roll + activation)', 'other', 'full', false),
+  X('foam-roll', 'Foam roll', 'other', 'full', false),
+  X('kb-90-90-switch', 'KB 90-90 hip switch', 'other', 'lower'),
+  X('two-arm-hang', 'Two-arm hang', 'other', 'upper', false),
+  X('jefferson-curl', 'Jefferson curl', 'other', 'full'),
+  X('pushup-down-dog', 'Push-up to down dog with toe touch', 'other', 'full', false),
+  X('band-calf-hops', 'Band-assisted calf hops', 'other', 'lower', false),
+  X('scap-pullup', 'Scap pull-up', 'pull', 'upper', false),
+  X('split-stance-pulse', 'Split stance pulses', 'other', 'lower', false),
+  X('prone-shoulder-er', 'Prone shoulder external rotation', 'other', 'upper', false),
+  X('bowler-squat-reach', 'Bowler squat with overhead reach', 'other', 'lower', false),
+  X('half-kneel-t-rotation', 'Half-kneeling T-spine rotation', 'other', 'upper', false),
+  X('kb-cossack-squat', 'KB Cossack squat', 'squat', 'lower'),
   X('pec-fly', 'Pec fly', 'push', 'upper'),
   X('sa-cable-row', 'Single arm cable row', 'pull', 'upper'),
   X('sa-leg-press', 'Single arm leg press (quad bias)', 'squat', 'lower'),
@@ -56,7 +63,23 @@ const FALL_2026_EXERCISES = [
   X('sa-rear-delt-fly', 'SA rear delt fly', 'pull', 'upper'),
 ];
 
-const warm = () => it('warmup', 1, null, { note: WARMUP_NOTE, measure: 'none' });
+// The warmup is its own section of exercises at the top of each day, so each
+// piece can be edited. Rows the sheet gave no sets for default to 1 set.
+const w = (exerciseId, sets, reps, opts = {}) => ({ ...it(exerciseId, sets, reps, opts), warmup: true });
+const warm = () => [
+  w('foam-roll', 1, null, { measure: 'none', note: 'IT band/TFL, quads, hip flexors, hamstrings, adductors, lats, pecs, T-spine, foot arches (baseball)' }),
+  w('kb-90-90-switch', 1, 5, { note: '8 kg KB, 5 each side' }),
+  w('two-arm-hang', 1, null, { measure: 'none', note: 'No excessive back arching' }),
+  w('jefferson-curl', 1, null, { measure: 'none', note: '6 deep breaths, exhale fully, roll through each vertebra on the way down' }),
+  w('pushup-down-dog', 1, 5, { note: '5 each side, one fluid motion' }),
+  w('band-calf-hops', 1, 100, { note: 'Springy and reactive, arms at your sides, 3-5 inches off the ground' }),
+  w('scap-pullup', 1, 10, { note: 'Retract the shoulder blades to start a pull-up' }),
+  w('split-stance-pulse', 1, 50, { note: '50 each side. Drop to about 90 degrees at each joint, then rise above neutral' }),
+  w('prone-shoulder-er', 3, null, { measure: 'time', secs: 3, note: 'Right arm only. Half roller or water bottle under the shoulder, ribcage tucked' }),
+  w('bowler-squat-reach', 1, 6, { note: '6 each side, whole foot (tripod) on the ground' }),
+  w('half-kneel-t-rotation', 1, 8, { note: '8 each side, follow the reaching arm with your head' }),
+  w('kb-cossack-squat', 1, 5, { note: '12 kg KB, 5 each side. Straight leg long, as low as comfortable' }),
+];
 
 const FALL_2026_BLOCK = {
   name: 'Fall 2026',
@@ -66,7 +89,7 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 1: Full body',
       items: [
-        warm(),
+        ...warm(),
         it('pec-fly', 3, 10, { range: '10-12', rir: '1/0', rest: '3-5 min', tempo: '3-1-X-1', note: '3 second eccentric + 1 second pause at full stretch + 1 second pause at peak contraction on every rep' }),
         it('sa-cable-row', 3, 8, { range: '8-10', rest: '3-5 min (4-5 min from week 7)', note: '2 second hold at fully stretched position / 1 second hold at peak contraction on every rep' }),
         it('sa-leg-press', 3, 8, { range: '8-10', rest: '2 min', note: 'Rest pause set, fail 3 total times' }),
@@ -81,7 +104,7 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 2: Full body',
       items: [
-        warm(),
+        ...warm(),
         it('wide-lat-pulldown', 3, 8, { range: '8-10', rir: 1, rest: '3-5 min', note: "Scaps should retract when all the way at the bottom position and shoulders shouldn't round forwards" }),
         it('incline-db-bench', 3, 8, { range: '8-10', rir: 0, rest: '3-5 min', note: 'Keep ribs down and elbows tucked, but not all the way at your sides' }),
         it('sl-quad-extension', 3, 8, { range: '8-10', rir: 0, rest: '3-5 min', note: 'FULL ROM' }),
@@ -96,7 +119,7 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 3: Legs',
       items: [
-        warm(),
+        ...warm(),
         it('front-squat', 3, null, { rir: 1, rest: '3-5 min', note: 'Feet hip width apart. Slight bend at the knees but I want you to feel this in your hamstrings. Keep the bar close to your body' }),
         it('seated-leg-curl', 3, 6, { range: '6-10', rir: 0, rest: '3-5 min', note: 'Fully contract & squeeze as hard as possible on every rep here. Fully control the eccentric, fight the rep on the way down. Briefly pause at the bottom of the rep while your quads are in the fully stretched position, keeping tension on them; the weight should not be resting on the stack here. Keep your butt down on the seat & hold yourself down.' }),
         it('adductor-machine', 3, 8, { range: '8-10', rest: '3-5 min', note: '1 second pause at bottom' }),
@@ -108,7 +131,7 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 4: Upper',
       items: [
-        warm(),
+        ...warm(),
         it('incline-db-bench', 3, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: ARM_CUE }),
         it('machine-row-kelso', 3, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: "This HAS to get full retraction especially when you do kelsos. And it has to be back and down. Not up. Otherwise you'll be very sad" }),
         it('katana-tricep-ext', 2, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: ARM_CUE }),
@@ -127,7 +150,7 @@ export const TEMPLATES = [
   {
     id: 'fall-2026',
     name: 'Fall 2026',
-    about: '10 weeks, 4 days: two full body days, legs, upper. Warmup, holds and RIR targets from the Fall 2026 sheet.',
+    about: '10 weeks, 4 days: two full body days, legs, upper. A 12-exercise warmup section on each day, plus holds and RIR targets from the Fall 2026 sheet.',
     block: FALL_2026_BLOCK,
     exercises: FALL_2026_EXERCISES,
   },

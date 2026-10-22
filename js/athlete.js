@@ -40,11 +40,14 @@ function targetText(set, measure) {
   return reps ? `${reps} rep${reps === 1 ? '' : 's'}` : '';
 }
 
-// Group letters for supersets ("A1", "A2") or plain order numbers.
+// Group letters for supersets ("A1", "A2") or plain order numbers; warmup
+// exercises are W1, W2...
 function orderLabels(entries) {
   const seen = {};
   let n = 0;
+  let w = 0;
   return entries.map((e) => {
+    if (e.warmup) return `W${++w}`;
     if (!e.group) return String(++n);
     seen[e.group] = (seen[e.group] || 0) + 1;
     if (seen[e.group] === 1) n++;
@@ -174,7 +177,12 @@ export function session(root, { id, date }) {
       <span class="kicker">${esc(block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
       <div class="row between"><h1>${esc(log.name)}</h1><button class="chip" data-action="switch">Switch</button></div>
     </header>
-    ${log.entries.map((e, i) => entryCard(log, e, i, labels[i])).join('')}
+    ${log.entries.map((e, i) => {
+      // Headings split the warmup from the main work when there is a warmup.
+      const head = e.warmup && !log.entries[i - 1]?.warmup ? '<h2 class="sec-head">Warmup</h2>'
+        : !e.warmup && log.entries[i - 1]?.warmup ? '<h2 class="sec-head">Workout</h2>' : '';
+      return head + entryCard(log, e, i, labels[i]);
+    }).join('')}
     <button class="btn ghost wide" data-action="addExercise">+ Add an exercise</button>
     <section class="finish">
       <h2>Finish</h2>

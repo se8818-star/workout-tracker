@@ -88,6 +88,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
       const n = measure === 'none' ? 1 : prescribedSets(item, block, week);
       return {
         exerciseId: item.exerciseId,
+        ...(item.warmup ? { warmup: true } : {}),
         measure,
         note: item.note || '',
         tempo: item.tempo || '',
@@ -107,7 +108,7 @@ export function sessionTotals(session, exercises, onlyDone = true) {
   const t = { tonnage: 0, reps: 0, sets: 0, contacts: 0, highContacts: 0, sprintMeters: 0, throws: 0, setsByPattern: {}, tonnageByPattern: {}, zones: { z70: 0, z80: 0, z90: 0 } };
   for (const entry of session.items || session.entries || []) {
     const ex = exercises[entry.exerciseId];
-    if (!ex) continue;
+    if (!ex || entry.warmup) continue; // warmups don't count toward training load
     for (const s of setsOf(entry, onlyDone)) {
       const reps = Number(s.reps) || 0;
       const w = Number(s.weight) || 0;

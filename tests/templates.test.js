@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TEMPLATES } from '../js/templates.js';
-import { buildSession } from '../js/calc.js';
+import { buildSession, sessionTotals } from '../js/calc.js';
 
 test('every template item uses an exercise the template brings', () => {
   for (const t of TEMPLATES) {
@@ -14,10 +14,24 @@ test('Fall 2026 builds a session with RIR mapped to RPE and notes kept', () => {
   const t = TEMPLATES.find((x) => x.id === 'fall-2026');
   assert.equal(t.block.weeks, 10);
   const s = buildSession(t.block, 0, 0, { maxes: {} });
-  const fly = s.items[1];
+  const fly = s.items.find((x) => x.exerciseId === 'pec-fly');
   assert.equal(fly.exerciseId, 'pec-fly');
   assert.equal(fly.sets.length, 3);
   assert.equal(fly.sets[0].rpe, 9.5);
   assert.equal(fly.tempo, '3-1-X-1');
   assert.match(fly.note, /Reps 10-12 · RIR 1\/0 · Rest 3-5 min/);
+});
+
+test('Fall 2026 days open with a warmup section that is left out of training totals', () => {
+  const t = TEMPLATES.find((x) => x.id === 'fall-2026');
+  for (const d of t.block.days) {
+    const firstMain = d.items.findIndex((x) => !x.warmup);
+    assert.ok(firstMain > 0);
+    assert.ok(d.items.slice(firstMain).every((x) => !x.warmup), 'warmup items come first');
+  }
+  const ex = Object.fromEntries(t.exercises.map((e) => [e.id, e]));
+  const s = buildSession(t.block, 0, 0, { maxes: {} });
+  const warm = s.items.filter((x) => x.warmup).reduce((n, x) => n + x.sets.length, 0);
+  const all = s.items.reduce((n, x) => n + x.sets.length, 0);
+  assert.equal(sessionTotals(s, ex, false).sets, all - warm);
 });
