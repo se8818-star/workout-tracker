@@ -59,6 +59,10 @@ function render(keepScroll = false) {
   if (gate(root)) { nav(''); return; }
   if (cloudEnabled && path === '/') { const m = me(); location.hash = m.role === 'coach' ? '#/coach' : `#/athlete/${m.athleteId}`; return; }
   if (!me() && path !== '/') { location.hash = '#/'; return; }
+  // Athletes only see their own pages: no coach screens, no other athletes.
+  const m = me();
+  const other = path.match(/^\/athlete\/([^/]+)/);
+  if (m?.role === 'athlete' && (path.startsWith('/coach') || (other && other[1] !== m.athleteId))) { location.hash = `#/athlete/${m.athleteId}`; return; }
   for (const [re, view, keys = []] of routes) {
     const m = path.match(re);
     if (!m) continue;

@@ -19,6 +19,13 @@ create table if not exists members (
   primary key (user_id, team_id)
 );
 
+-- Only these emails can create a team (and so get the coach view). Everyone
+-- else can only join a team as an athlete. Add yours after running this file:
+--   insert into coach_emails (email) values ('you@example.com');
+create table if not exists coach_emails (
+  email text primary key
+);
+
 create table if not exists records (
   team_id uuid not null references teams on delete cascade,
   kind text not null check (kind in ('exercises', 'athletes', 'blocks', 'assignments', 'logs')),
@@ -47,6 +54,8 @@ create trigger records_stamp before insert or update on records
 alter table teams enable row level security;
 alter table members enable row level security;
 alter table records enable row level security;
+-- No policies on coach_emails: the list is only read inside can_coach().
+alter table coach_emails enable row level security;
 
 -- Helpers (security definer so policies can look at members without recursion).
 create or replace function is_member(t uuid) returns boolean
@@ -67,11 +76,25 @@ $$;
 drop policy if exists teams_read on teams;
 create policy teams_read on teams for select using (is_member(id));
 
-drop policy if exists members_read on members;
-create policy members_read on members for select using (is_member(team_id));
+create or replace function can_coach() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from coach_emails where lower(email) = lower(auth.jwt() ->> 'email'));
+$$;
 
+drop policy if exists members_read on members;
+create policy members_read on members for select using (user_id = auth.uid() or is_coach(team_id));
+
+-- Coaches read everything in their team. Athletes read the shared library and
+-- programs, plus only their own athlete record, assignments and logs.
 drop policy if exists records_read on records;
-create policy records_read on records for select using (is_member(team_id));
+create policy records_read on records for select using (
+  is_coach(team_id)
+  or (is_member(team_id) and (
+    kind in ('exercises', 'blocks')
+    or (kind = 'athletes' and id = my_athlete_id(team_id))
+    or (kind in ('logs', 'assignments') and data->>'athleteId' = my_athlete_id(team_id))
+  ))
+);
 
 -- Coaches can write anything in their team. Athletes can write only their own
 -- logs and their own athlete record (so new maxes from PRs are saved).
@@ -93,6 +116,7 @@ create or replace function create_team(team_name text) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare t uuid;
 begin
+  if not can_coach() then raise exception 'Only an approved coach email can create a team. Ask your coach for the team code.'; end if;
   insert into teams (name) values (team_name) returning id into t;
   insert into members (user_id, team_id, role) values (auth.uid(), t, 'coach');
   return t;
@@ -114,4 +138,5 @@ begin
 end $$;
 
 grant execute on function create_team(text) to authenticated;
+grant execute on function can_coach() to authenticated;
 grant execute on function join_team(text, text, text) to authenticated;
