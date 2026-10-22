@@ -90,3 +90,11 @@ test('quick entry shorthand', () => {
   assert.deepEqual(parseQuickEntry('Box jump 3x5'), { name: 'Box jump', sets: 3, reps: 5 });
   assert.equal(parseQuickEntry('just words'), null);
 });
+
+test('buildSession carries the coach tempo and note to the athlete', () => {
+  const block = { weeks: 1, days: [{ name: 'A', items: [{ exerciseId: 'squat', sets: 2, reps: 5, tempo: '3-1-1-0', note: 'Brace' }, { exerciseId: 'box', sets: 1, reps: 3 }] }] };
+  const s = buildSession(block, 0, 0, { maxes: {} });
+  assert.equal(s.items[0].tempo, '3-1-1-0');
+  assert.equal(s.items[0].note, 'Brace');
+  assert.equal(s.items[1].tempo, '');
+});

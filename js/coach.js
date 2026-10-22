@@ -4,6 +4,7 @@ import * as store from './store.js';
 import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, PATTERN_LABEL, $ } from './ui.js';
+import { pickExerciseSheet } from './athlete.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -148,37 +149,58 @@ function findExercise(name) {
     || all.find((x) => x.name.toLowerCase().includes(n));
 }
 
+// A number with − / + buttons either side, for sets and reps.
+function stepper(label, k, value, min) {
+  return `<div class="stepper"><span>${label}</span>
+    <div class="stepper-row"><button class="step-btn" data-action="step" data-k="${k}" data-d="-1" aria-label="Fewer ${label.toLowerCase()}">−</button>
+    <input type="number" inputmode="numeric" min="${min}" value="${value ?? ''}" data-action="itemField" data-k="${k}" aria-label="${label}">
+    <button class="step-btn" data-action="step" data-k="${k}" data-d="1" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
+}
+
 function itemRow(item, di, ii, ex) {
   const x = ex[item.exerciseId];
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
   const prog = item.progression || { type: 'none' };
   const loadedEx = store.all('exercises').filter((e) => e.loaded).sort((a, b) => a.name.localeCompare(b.name));
+  // Less-used settings stay folded away unless one is already in use.
+  const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
   return `<div class="item" data-di="${di}" data-ii="${ii}">
     <div class="item-top">
-      <b>${esc(x?.name || item.exerciseId)}</b>
+      <span class="item-n">${item.group ? esc(item.group) : ii + 1}</span>
+      <button class="item-name" data-action="itemPick" title="Change exercise">${esc(x?.name || item.exerciseId)}</button>
       ${x?.contactsPerRep ? `<span class="pill">${x.contactsPerRep}c/rep · T${x.plyoTier}</span>` : ''}
       <span class="spacer"></span>
       <button class="icon-btn" data-action="itemUp" title="Move up" aria-label="Move up">↑</button>
       <button class="icon-btn" data-action="itemDown" title="Move down" aria-label="Move down">↓</button>
       <button class="icon-btn" data-action="itemDel" title="Remove" aria-label="Remove">✕</button>
     </div>
-    <div class="item-fields">
-      <label>Sets<input type="number" min="1" value="${item.sets}" data-action="itemField" data-k="sets"></label>
-      <label>Reps<input type="number" min="0" value="${item.reps}" data-action="itemField" data-k="reps"></label>
-      ${x?.loaded ? `<label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
+    <div class="item-main">
+      ${stepper('Sets', 'sets', item.sets, 1)}
+      <span class="times" aria-hidden="true">×</span>
+      ${stepper('Reps', 'reps', item.reps, 0)}
+    </div>
+    ${x?.loaded ? `<div class="item-fields">
+      <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
       ${loadType === 'pct' ? `<label>%<input type="number" step="0.5" value="${item.pct}" data-action="itemField" data-k="pct"></label>
         <label>Max from<select data-action="itemField" data-k="maxFrom"><option value="">${esc(x.name)}</option>${loadedEx.filter((e) => e.id !== item.exerciseId).map((e) => `<option value="${e.id}" ${item.maxFrom === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : ''}
-      ${loadType === 'weight' ? `<label>${store.settings().units}<input type="number" step="any" value="${item.weight}" data-action="itemField" data-k="weight"></label>` : ''}` : ''}
-      <label>RPE<input type="number" step="0.5" min="1" max="10" value="${item.rpe ?? ''}" data-action="itemField" data-k="rpe"></label>
-      <label>Each week<select data-action="progType">
-        <option value="none" ${prog.type === 'none' ? 'selected' : ''}>Same</option>
-        ${x?.loaded ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
-        <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
-        <option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ reps</option></select></label>
-      ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${prog.step ?? ''}" data-action="progStep"></label>` : ''}
-      <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
+      ${loadType === 'weight' ? `<label>${store.settings().units}<input type="number" step="any" value="${item.weight}" data-action="itemField" data-k="weight"></label>` : ''}
+    </div>` : ''}
+    <div class="item-notes">
+      <label>Tempo<input type="text" placeholder="e.g. 3-1-1-0" value="${esc(item.tempo || '')}" data-action="itemField" data-k="tempo"></label>
+      <label>Notes<textarea class="item-note" rows="2" placeholder="Cues, rest, setup… the athlete sees this" data-action="itemField" data-k="note">${esc(item.note || '')}</textarea></label>
     </div>
-    <input class="item-note" type="text" placeholder="Coaching note (optional)" value="${esc(item.note || '')}" data-action="itemField" data-k="note">
+    <details class="item-extra" ${extrasOpen ? 'open' : ''}><summary>RPE, weekly progression, superset</summary>
+      <div class="item-fields">
+        <label>RPE<input type="number" step="0.5" min="1" max="10" value="${item.rpe ?? ''}" data-action="itemField" data-k="rpe"></label>
+        <label>Each week<select data-action="progType">
+          <option value="none" ${prog.type === 'none' ? 'selected' : ''}>Same</option>
+          ${x?.loaded ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
+          <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
+          <option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ reps</option></select></label>
+        ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${prog.step ?? ''}" data-action="progStep"></label>` : ''}
+        <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
+      </div>
+    </details>
   </div>`;
 }
 
@@ -223,10 +245,13 @@ export function blockEditor(root, { id }, query) {
         </div>
         <p class="muted small day-tot" data-di="${di}">${dayLine(dayTots[di])}</p>
         ${d.items.map((it, ii) => itemRow(it, di, ii, ex)).join('')}
-        <div class="quick">
-          <textarea rows="2" placeholder="Quick add, one per line:&#10;Back squat 4x5 @80% +2.5%/wk&#10;Box jump 3x5" data-di="${di}" aria-label="Quick add exercises"></textarea>
-          <button class="chip" data-action="quickAdd" data-di="${di}">Add</button>
-        </div>
+        <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
+        <details class="quick-wrap"><summary>Or type a list</summary>
+          <div class="quick">
+            <textarea rows="2" placeholder="One per line:&#10;Back squat 4x5 @80% +2.5%/wk&#10;Box jump 3x5" data-di="${di}" aria-label="Quick add exercises"></textarea>
+            <button class="chip" data-action="quickAdd" data-di="${di}">Add</button>
+          </div>
+        </details>
       </section>`).join('')}
     <button class="btn ghost wide" data-action="addDay">+ Add day</button>
     <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this block</a>`;
@@ -261,7 +286,7 @@ export function blockEditor(root, { id }, query) {
       const { di, ii } = itemOf(el);
       const k = el.dataset.k;
       const it = b.days[di].items[ii];
-      if (['note', 'group', 'maxFrom'].includes(k)) it[k] = el.value || undefined;
+      if (['note', 'tempo', 'group', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
       else it[k] = num(el.value);
       save(false);
     },
@@ -286,6 +311,35 @@ export function blockEditor(root, { id }, query) {
       save();
     },
     progStep: (el) => { const { di, ii } = itemOf(el); b.days[di].items[ii].progression.step = num(el.value); save(false); },
+    step: (el) => {
+      const { di, ii } = itemOf(el);
+      const it = b.days[di].items[ii];
+      const k = el.dataset.k;
+      it[k] = Math.max(k === 'sets' ? 1 : 0, (it[k] || 0) + Number(el.dataset.d));
+      // Update the box in place; a full redraw would lose the next quick tap.
+      el.parentElement.querySelector('input').value = it[k];
+      save(false);
+    },
+    itemPick: (el) => {
+      const { di, ii } = itemOf(el);
+      const it = b.days[di].items[ii];
+      pickExerciseSheet((exId) => {
+        it.exerciseId = exId;
+        if (!store.get('exercises', exId)?.loaded) {
+          delete it.pct; delete it.weight; delete it.maxFrom;
+          if (['add_pct', 'add_weight'].includes(it.progression?.type)) it.progression = undefined;
+        }
+        save();
+      }, { allowNew: true });
+    },
+    itemAdd: (el) => {
+      const di = Number(el.dataset.di);
+      pickExerciseSheet((exId) => {
+        b.days[di].items.push({ exerciseId: exId, sets: 3, reps: 8 });
+        save();
+        root.querySelector(`.item[data-di="${di}"][data-ii="${b.days[di].items.length - 1}"]`)?.scrollIntoView({ block: 'center' });
+      }, { allowNew: true });
+    },
     itemUp: (el) => { const { di, ii } = itemOf(el); if (ii > 0) { const a = b.days[di].items; [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]]; save(); } },
     itemDown: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii < a.length - 1) { [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]]; save(); } },
     itemDel: (el) => { const { di, ii } = itemOf(el); b.days[di].items.splice(ii, 1); save(); },

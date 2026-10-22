@@ -100,6 +100,7 @@ function entryCard(log, entry, i, label) {
   const loaded = ex.loaded !== false;
   const lastTxt = last ? `Last time: ${last.sets.map((s) => s.weight ? `${s.weight}×${s.reps}` : `${s.reps}`).join(', ')}` : '';
   const tags = [];
+  if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
   if (entry.swappedFrom) tags.push(`Swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${loaded ? '' : 'no-load'}">
@@ -265,18 +266,34 @@ function swapSheet(log, i, done) {
   });
 }
 
-export function pickExerciseSheet(onPick) {
+// With allowNew (coach side), typing a name that isn't in the library offers
+// to create it on the spot.
+export function pickExerciseSheet(onPick, { allowNew = false } = {}) {
   const all = store.all('exercises').sort((a, b) => a.name.localeCompare(b.name));
   const html = `<input type="search" class="search" placeholder="Search exercises" aria-label="Search exercises">
+    ${allowNew ? '<button class="btn ghost wide pick-new" data-new hidden></button>' : ''}
     <ul class="pick">${all.map((x) => `<li data-name="${esc(x.name.toLowerCase())}"><button data-pick="${x.id}">${esc(x.name)} <small>${PATTERN_LABEL[x.pattern] || ''}</small></button></li>`).join('')}</ul>`;
   sheet('Pick exercise', html, (w) => {
     const q = w.querySelector('.search');
+    const add = w.querySelector('[data-new]');
     q.focus();
     q.addEventListener('input', () => {
-      const v = q.value.toLowerCase();
+      const v = q.value.toLowerCase().trim();
       w.querySelectorAll('li[data-name]').forEach((li) => { li.hidden = !li.dataset.name.includes(v); });
+      if (add) {
+        add.hidden = !v || all.some((x) => x.name.toLowerCase() === v);
+        add.textContent = `+ New exercise "${q.value.trim()}"`;
+      }
     });
-    w.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) { closeSheet(); onPick(b.dataset.pick); } });
+    w.addEventListener('click', (e) => {
+      if (e.target.closest('[data-new]')) {
+        const x = store.put('exercises', { id: store.uid('ex'), name: q.value.trim(), pattern: 'other', body: 'full', loaded: false, alts: [] });
+        toast(`Added "${x.name}" to the library. Set its movement type there.`);
+        closeSheet(); onPick(x.id); return;
+      }
+      const b = e.target.closest('[data-pick]');
+      if (b) { closeSheet(); onPick(b.dataset.pick); }
+    });
   });
 }
 
