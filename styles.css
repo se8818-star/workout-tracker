@@ -259,6 +259,17 @@ textarea { resize: vertical; }
 .seg button + button { border-left: var(--thin); }
 .seg button.on { background: var(--ink); color: var(--paper); }
 .item-none { margin: 10px 0 4px; }
+.sec { margin-top: 14px; }
+.sec h4 {
+  margin: 0 0 6px; font: 600 0.66rem var(--mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.sec h4::after { content: ""; flex: 1; border-top: var(--hair); }
+.warm-sec { padding: 10px; background: var(--paper); border: 1.5px dashed #c9c1b1; }
+.warm-sec .item { background: var(--card); }
+.warm-sec .item-n { background: var(--muted); }
+.sec-head { font-size: 1.3rem; margin: 22px 0 10px; display: flex; align-items: center; gap: 10px; }
+.sec-head::after { content: ""; flex: 1; border-top: var(--rule); }
 .templates { margin-top: 32px; }
 .templates .card small { display: block; max-width: 48ch; margin-top: 2px; }
 .day-card { border-top-width: 10px; border-top-color: var(--track); }
