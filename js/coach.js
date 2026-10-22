@@ -194,8 +194,14 @@ export function blockEditor(root, { id }, query) {
   if (!b) { root.innerHTML = '<p class="empty">Block not found.</p>'; return; }
   const ex = store.exercisesById();
   const week = Math.min(Number(query.get('w') || 0), b.weeks - 1);
-  let weekTot = emptyTotals();
-  const dayTots = b.days.map((_, di) => { const t = plannedDayTotals(b, di, week); weekTot = addTotals(weekTot, t); return t; });
+  const totals = () => {
+    let wk = emptyTotals();
+    const days = b.days.map((_, di) => { const t = plannedDayTotals(b, di, week); wk = addTotals(wk, t); return t; });
+    return { wk, days };
+  };
+  const weekLine = (t) => `Week ${week + 1} plan: <b>${fmt(t.sets)}</b> sets, <b>${fmt(t.contacts)}</b> plyo contacts (${fmt(t.highContacts)} high), ${fmt(t.sprintMeters)} m sprinting.`;
+  const dayLine = (t) => `${fmt(t.sets)} sets · ${fmt(t.contacts)} contacts${t.sprintMeters ? ` · ${t.sprintMeters} m` : ''}`;
+  const { wk: weekTot, days: dayTots } = totals();
 
   root.innerHTML = `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
@@ -205,7 +211,7 @@ export function blockEditor(root, { id }, query) {
       <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
       <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
     </section>
-    <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. Week ${week + 1} plan: <b>${fmt(weekTot.sets)}</b> sets, <b>${fmt(weekTot.contacts)}</b> plyo contacts (${fmt(weekTot.highContacts)} high), ${fmt(weekTot.sprintMeters)} m sprinting.</p>
+    <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
     ${b.days.map((d, di) => `
       <section class="card day-card" data-di="${di}">
         <div class="row between gap">
@@ -215,7 +221,7 @@ export function blockEditor(root, { id }, query) {
             <button class="chip" data-action="dayDel" data-di="${di}">Delete</button>
           </div>
         </div>
-        <p class="muted small">${fmt(dayTots[di].sets)} sets · ${fmt(dayTots[di].contacts)} contacts${dayTots[di].sprintMeters ? ` · ${dayTots[di].sprintMeters} m` : ''}</p>
+        <p class="muted small day-tot" data-di="${di}">${dayLine(dayTots[di])}</p>
         ${d.items.map((it, ii) => itemRow(it, di, ii, ex)).join('')}
         <div class="quick">
           <textarea rows="2" placeholder="Quick add, one per line:&#10;Back squat 4x5 @80% +2.5%/wk&#10;Box jump 3x5" data-di="${di}" aria-label="Quick add exercises"></textarea>
@@ -225,7 +231,20 @@ export function blockEditor(root, { id }, query) {
     <button class="btn ghost wide" data-action="addDay">+ Add day</button>
     <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this block</a>`;
 
-  const save = (rerender = true) => { store.put('blocks', b); if (rerender) blockEditor(root, { id }, query); };
+  // Typing in a field only saves and refreshes the totals; a full redraw would
+  // swallow the next tap. Structural changes (add/move/remove) redraw, keeping focus.
+  const refreshTotals = () => {
+    const t = totals();
+    $('#week-tot', root).innerHTML = weekLine(t.wk);
+    root.querySelectorAll('.day-tot').forEach((el) => { el.textContent = dayLine(t.days[el.dataset.di]); });
+  };
+  const save = (rerender = true) => {
+    store.put('blocks', b);
+    if (!rerender) { refreshTotals(); return; }
+    const scrollY = window.scrollY;
+    blockEditor(root, { id }, query);
+    window.scrollTo(0, scrollY);
+  };
   const itemOf = (el) => { const r = el.closest('.item'); return { di: Number(r.dataset.di), ii: Number(r.dataset.ii) }; };
   const num = (v) => (v === '' ? null : Number(v));
 
@@ -244,7 +263,7 @@ export function blockEditor(root, { id }, query) {
       const it = b.days[di].items[ii];
       if (['note', 'group', 'maxFrom'].includes(k)) it[k] = el.value || undefined;
       else it[k] = num(el.value);
-      save(k === 'sets' || k === 'reps');
+      save(false);
     },
     loadType: (el) => {
       const { di, ii } = itemOf(el);
@@ -252,6 +271,11 @@ export function blockEditor(root, { id }, query) {
       delete it.pct; delete it.weight;
       if (el.value === 'pct') it.pct = 70;
       if (el.value === 'weight') it.weight = 45;
+      // Keep the weekly rule meaningful for the new load type.
+      const pt = it.progression?.type;
+      if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: 5 };
+      if (el.value === 'pct' && pt === 'add_weight') it.progression = { type: 'add_pct', step: 2.5 };
+      if (el.value === 'none' && (pt === 'add_pct' || pt === 'add_weight')) it.progression = undefined;
       save();
     },
     progType: (el) => {
@@ -296,14 +320,19 @@ export function assign(root, _p, query) {
   const pre = query.get('athlete');
   const blockId = query.get('block') || blocksList[0]?.id;
   const block = store.get('blocks', blockId);
-  const nextMon = addDays(weekStart(today()), 7);
-  const wd = defaultWeekdays(block?.days.length || 3);
+  if (!block) {
+    root.innerHTML = '<header class="page-head"><h1>Assign a program</h1></header><div class="empty"><p>Build a block first, then assign it here.</p><a class="btn" href="#/coach/blocks">Go to programs</a></div>';
+    return;
+  }
+  // Default to this week so the program shows up for athletes right away.
+  const startMon = weekStart(today());
+  const wd = defaultWeekdays(block.days.length);
   root.innerHTML = `
     <header class="page-head"><h1>Assign a program</h1></header>
     <section class="card form">
       <label class="field-row"><span>Block</span><select id="as-block" data-action="pickBlock">${blocksList.map((b) => `<option value="${b.id}" ${b.id === blockId ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>
-      <label class="field-row"><span>Start date</span><input type="date" id="as-start" value="${nextMon}"></label>
-      <fieldset><legend>Training days (${block?.days.length || 0} per week, in order)</legend>
+      <label class="field-row"><span>Start date</span><input type="date" id="as-start" value="${startMon}"></label>
+      <fieldset><legend>Training days (${block.days.length} per week, in order)</legend>
         <div class="row gap wrap">${WEEKDAYS.map((d, i) => `<label class="check-chip"><input type="checkbox" name="wd" value="${i}" ${wd.includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></fieldset>
       <fieldset><legend>Athletes</legend>
         <div class="row gap wrap">${groups.map((g) => `<button class="chip" data-action="pickGroup" data-g="${esc(g)}">All ${esc(g)}</button>`).join('')}<button class="chip" data-action="pickAll">Everyone</button></div>

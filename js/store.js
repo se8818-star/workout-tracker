@@ -35,10 +35,16 @@ export function load({ cloud = false } = {}) {
 export const isDemo = () => demo;
 
 // Records arriving from the server: saved locally without marking them dirty.
+// Returns true only if something actually changed (our own uploads come back
+// as echoes, and re-rendering for those would wipe whatever is being typed).
 export function applyRemote(kind, id, data) {
-  if (!db[kind]) return;
-  if (db.dirty[`${kind}/${id}`]) return; // a local edit is waiting to upload; it wins
-  if (data) db[kind][id] = data; else delete db[kind][id];
+  if (!db[kind]) return false;
+  if (db.dirty[`${kind}/${id}`]) return false; // a local edit is waiting to upload; it wins
+  const cur = db[kind][id];
+  if (!data) { if (!cur) return false; delete db[kind][id]; return true; }
+  if (cur && JSON.stringify(cur) === JSON.stringify(data)) return false;
+  db[kind][id] = data;
+  return true;
 }
 export function flush() { save(); }
 
@@ -123,7 +129,10 @@ export function startLog(athleteId, iso, plan) {
   return put('logs', {
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
-    name: s.name, entries: s.items, sessionRpe: null, minutes: null, note: '', finished: false,
+    name: s.name,
+    // Prescribed numbers become targets; the boxes start empty for the athlete to fill.
+    entries: s.items.map((it) => ({ ...it, sets: it.sets.map((x) => ({ targetReps: x.reps, targetWeight: x.weight, rpe: x.rpe, reps: null, weight: null, done: false })) })),
+    sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }
 

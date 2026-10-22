@@ -31,6 +31,19 @@ create table if not exists records (
 );
 create index if not exists records_updated on records (team_id, updated_at);
 
+-- The server stamps every write, so devices with wrong clocks still sync in order.
+create or replace function stamp_record() returns trigger
+language plpgsql as $$
+begin
+  new.updated_at := clock_timestamp();
+  new.updated_by := auth.uid();
+  return new;
+end $$;
+
+drop trigger if exists records_stamp on records;
+create trigger records_stamp before insert or update on records
+  for each row execute function stamp_record();
+
 alter table teams enable row level security;
 alter table members enable row level security;
 alter table records enable row level security;

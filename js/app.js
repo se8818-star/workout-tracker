@@ -12,6 +12,7 @@ const routes = [
   [/^\/$/, home],
   [/^\/athlete\/([^/]+)$/, athleteViews.today_, ['id']],
   [/^\/athlete\/([^/]+)\/week$/, athleteViews.week, ['id']],
+  [/^\/athlete\/([^/]+)\/session\/(\d{4}-\d{2}-\d{2})$/, athleteViews.session, ['id', 'date']],
   [/^\/athlete\/([^/]+)\/history$/, athleteViews.history, ['id']],
   [/^\/coach$/, coachViews.board],
   [/^\/coach\/athlete\/([^/]+)$/, coachViews.athlete, ['id']],
@@ -29,7 +30,7 @@ function nav(path) {
   let items = [];
   if (m?.role === 'athlete') {
     const id = m.athleteId;
-    items = [[`#/athlete/${id}`, 'Today', '◉'], [`#/athlete/${id}/week`, 'My week', '▤'], [`#/athlete/${id}/history`, 'History', '↺'], ['#/settings', 'More', '⋯']];
+    items = [[`#/athlete/${id}`, 'Today', '◉'], [`#/athlete/${id}/week`, 'Analytics', '▤'], [`#/athlete/${id}/history`, 'History', '↺'], ['#/settings', 'More', '⋯']];
   } else if (m?.role === 'coach') {
     items = [['#/coach', 'Team', '◉'], ['#/coach/blocks', 'Programs', '▤'], ['#/coach/exercises', 'Exercises', '☰'], ['#/settings', 'More', '⋯']];
   }
@@ -41,7 +42,9 @@ function nav(path) {
     `<a href="${href}" class="${href.slice(1) === active ? 'on' : ''}"><span aria-hidden="true">${icon}</span>${label}</a>`).join('');
 }
 
-function render() {
+// Sync calls this with keepScroll so a background refresh doesn't jump the page.
+function render(keepScroll = false) {
+  const y = window.scrollY;
   const raw = location.hash.slice(1) || '/';
   const [path, qs] = raw.split('?');
   const query = new URLSearchParams(qs || '');
@@ -57,7 +60,7 @@ function render() {
     const params = Object.fromEntries(keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
     view(root, params, query);
     nav(path);
-    window.scrollTo(0, 0);
+    window.scrollTo(0, keepScroll === true ? y : 0);
     return;
   }
   root.innerHTML = '<p class="empty">Page not found. <a href="#/">Home</a></p>';
@@ -115,9 +118,9 @@ function settingsView(root) {
   });
 }
 
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => render());
 render();
-startSync(render);
+startSync(() => render(true));
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

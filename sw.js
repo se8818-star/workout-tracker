@@ -1,6 +1,6 @@
 // Offline support: cache the app shell, serve it when there's no signal.
 // Bump VERSION whenever app files change so phones pick up the new copy.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/athlete.js', 'js/coach.js', 'js/calc.js', 'js/config.js', 'js/seed.js',
@@ -24,7 +24,7 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        if (res.ok && (url.origin === location.origin || url.hostname === 'cdn.jsdelivr.net')) {
+        if (res.ok && (url.origin === location.origin || ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname))) {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put(e.request, copy));
         }

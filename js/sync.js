@@ -80,7 +80,7 @@ async function push() {
   const rows = dirty.map(([key, val]) => {
     const [kind, id] = key.split('/');
     const rec = store.get(kind, id);
-    return { team_id: membership.team_id, kind, id, data: rec || {}, deleted: val === 'deleted' || !rec, updated_at: new Date().toISOString() };
+    return { team_id: membership.team_id, kind, id, data: rec || {}, deleted: val === 'deleted' || !rec };
   });
   const { error } = await sb.from('records').upsert(rows);
   if (!error) { store.clearDirty(dirty.map(([k]) => k)); return; }
@@ -95,20 +95,24 @@ async function push() {
 }
 
 async function pull() {
-  const since = store.settings().lastPull || '1970-01-01T00:00:00Z';
-  let changed = false, newest = since;
+  const last = store.settings().lastPull || '1970-01-01T00:00:00Z';
+  // Re-read a 2-minute overlap so a write that committed late isn't skipped.
+  const since = new Date(new Date(last).getTime() - 120000).toISOString();
+  let changed = false, newest = last;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb.from('records').select('kind, id, data, deleted, updated_at')
       .eq('team_id', membership.team_id).gt('updated_at', since).order('updated_at').range(from, from + 999);
     if (error) { console.warn(error); return; }
     for (const r of data) {
-      store.applyRemote(r.kind, r.id, r.deleted ? null : r.data);
+      if (store.applyRemote(r.kind, r.id, r.deleted ? null : r.data)) changed = true;
       if (r.updated_at > newest) newest = r.updated_at;
-      changed = true;
     }
     if (data.length < 1000) break;
   }
-  if (changed) { store.setSetting('lastPull', newest); rerender(); }
+  if (newest !== last) store.setSetting('lastPull', newest);
+  // Don't redraw under someone who is typing; the next pull will catch up.
+  const typing = document.activeElement?.matches?.('input, textarea, select');
+  if (changed && !typing) rerender();
 }
 
 // Renders the sign-in or team screen when needed. Returns true if it took over the page.

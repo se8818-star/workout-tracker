@@ -1,9 +1,9 @@
-// Athlete screens: today's workout (log, notes, swaps, switch), my week, history.
+// Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, buildSession, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, PATTERN_LABEL } from './ui.js';
 
 const today = () => toISO(new Date());
 
@@ -23,56 +23,112 @@ function dateStrip(athleteId, iso) {
   return html;
 }
 
-function prescriptionText(set) {
-  const parts = [];
-  if (set.reps) parts.push(`${set.reps} reps`);
-  if (set.weight) parts.push(`${set.weight} ${store.settings().units}`);
-  if (set.rpe) parts.push(`RPE ${set.rpe}`);
-  return parts.join(' · ');
+function targetText(set) {
+  const reps = set.targetReps ?? set.reps;
+  const w = set.targetWeight ?? set.weight;
+  if (w) return `${w} × ${reps}`;
+  return reps ? `${reps} rep${reps === 1 ? '' : 's'}` : '';
 }
 
-function totalsBar(log) {
-  const t = sessionTotals(log, store.exercisesById(), true);
-  return `<div class="totals" id="live-totals">
-    <div><b>${fmt(t.tonnage)}</b><span>${store.settings().units} moved</span></div>
-    <div><b>${fmt(t.contacts)}</b><span>plyo contacts</span></div>
-    <div><b>${fmt(t.sets)}</b><span>sets done</span></div>
-  </div>`;
+// Group letters for supersets ("A1", "A2") or plain order numbers.
+function orderLabels(entries) {
+  const seen = {};
+  let n = 0;
+  return entries.map((e) => {
+    if (!e.group) return String(++n);
+    seen[e.group] = (seen[e.group] || 0) + 1;
+    if (seen[e.group] === 1) n++;
+    return `${e.group}${seen[e.group]}`;
+  });
 }
 
-function entryCard(log, entry, i) {
+function statusOf(log) {
+  if (!log) return { cls: '', txt: 'Not started' };
+  if (log.finished) return { cls: 'done', txt: 'Done' };
+  const done = log.entries.reduce((a, e) => a + e.sets.filter((s) => s.done).length, 0);
+  return done ? { cls: 'live', txt: 'In progress' } : { cls: '', txt: 'Not started' };
+}
+
+function workoutCard(id, iso, title, sub, count, log) {
+  const st = statusOf(log);
+  return `<a class="workout-card ${st.cls}" href="#/athlete/${id}/session/${iso}">
+    <div><span class="kicker">${esc(sub)}</span><h2>${esc(title)}</h2><p class="muted">${count} exercises</p></div>
+    <div class="workout-go"><span class="status ${st.cls}">${st.txt}</span><span class="arrow" aria-hidden="true">›</span></div></a>`;
+}
+
+// Today: the day's workout(s) as cards. Tapping one opens the workout page.
+export function today_(root, { id }, query) {
+  const athlete = store.get('athletes', id);
+  if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
+  const iso = query.get('d') || today();
+  const plans = store.plannedOn(id, iso);
+  const log = store.logFor(id, iso);
+
+  let body;
+  if (log) {
+    const block = store.get('blocks', log.blockId);
+    body = workoutCard(id, iso, log.name, block ? `${block.name} · Week ${log.week + 1}` : 'Workout', log.entries.length, log);
+  } else if (plans.length) {
+    const p = plans[0];
+    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · Deload' : ''}`, p.block.days[p.dayIndex].items.length, null);
+  } else {
+    body = `<div class="empty"><p><b>Rest day.</b> Nothing is scheduled.</p>
+      <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
+  }
+
+  root.innerHTML = `
+    <header class="page-head"><span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+      <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
+    ${dateStrip(id, iso)}
+    ${body}`;
+
+  bindActions(root, {
+    goDate: (el) => { location.hash = `#/athlete/${id}?d=${el.dataset.date}`; },
+    switch: () => switchSheet(id, iso, (plan) => {
+      const l = store.startLog(id, iso, plan);
+      store.saveLog(l);
+      closeSheet();
+      location.hash = `#/athlete/${id}/session/${iso}`;
+    }),
+  });
+}
+
+function entryCard(log, entry, i, label) {
   const ex = store.get('exercises', entry.exerciseId) || { name: entry.exerciseId };
   const last = store.lastTime(log.athleteId, entry.exerciseId, log.date);
   const units = store.settings().units;
-  const lastTxt = last ? `Last time (${fmtDate(last.date, { month: 'short', day: 'numeric' })}): ${last.sets.map((s) => s.weight ? `${s.weight}×${s.reps}` : `${s.reps}`).join(', ')}` : '';
+  const loaded = ex.loaded !== false;
+  const lastTxt = last ? `Last time: ${last.sets.map((s) => s.weight ? `${s.weight}×${s.reps}` : `${s.reps}`).join(', ')}` : '';
   const tags = [];
-  if (ex.contactsPerRep) tags.push(`${ex.contactsPerRep} contact${ex.contactsPerRep > 1 ? 's' : ''}/rep · tier ${ex.plyoTier}`);
-  if (entry.swappedFrom) tags.push(`swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
+  if (entry.swappedFrom) tags.push(`Swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
   const rows = entry.sets.map((s, j) => `
-    <div class="set ${s.done ? 'done' : ''}">
+    <div class="set ${s.done ? 'done' : ''} ${loaded ? '' : 'no-load'}">
       <span class="set-n">${j + 1}</span>
-      <label class="field"><input type="number" inputmode="numeric" min="0" value="${s.reps ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="reps" aria-label="Reps, set ${j + 1}"><span>reps</span></label>
-      ${ex.loaded !== false ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${s.weight ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : '<span class="field ghost"></span>'}
+      <span class="target">${esc(targetText(s))}</span>
+      ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${s.weight ?? ''}" placeholder="${s.targetWeight ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
+      <label class="field"><input type="number" inputmode="numeric" min="0" value="${s.reps ?? ''}" placeholder="${s.targetReps ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="reps" aria-label="Reps, set ${j + 1}"><span>reps</span></label>
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
-  return `<article class="card entry" id="entry-${i}">
+  return `<article class="entry ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
     <header>
-      <div><h3>${esc(ex.name)}</h3>${tags.length ? `<p class="tags">${esc(tags.join(' · '))}</p>` : ''}</div>
-      <div class="entry-actions">
-        <button class="chip" data-action="swap" data-i="${i}">Swap</button>
-        <button class="chip" data-action="allDone" data-i="${i}" title="Mark every set done as prescribed">All ✓</button>
-      </div>
+      <span class="order">${label}</span>
+      <div class="entry-title"><h3>${esc(ex.name)}</h3>
+        ${tags.length ? `<p class="tags">${esc(tags.join(' · '))}</p>` : ''}
+        ${lastTxt ? `<p class="last">${esc(lastTxt)}</p>` : ''}</div>
+      <button class="chip" data-action="swap" data-i="${i}">Swap</button>
     </header>
-    ${entry.note ? `<p class="coach-note">Coach: ${esc(entry.note)}</p>` : ''}
+    ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
     ${ex.video ? `<a class="link small" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Watch demo</a>` : ''}
-    ${lastTxt ? `<p class="last">${esc(lastTxt)}</p>` : ''}
+    <div class="set-head ${loaded ? '' : 'no-load'}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>Reps</span><span></span></div>
     <div class="sets">${rows}</div>
     <div class="entry-foot">
-      <button class="link" data-action="addSet" data-i="${i}">+ Add set</button>
-      ${entry.sets.length > 1 ? `<button class="link" data-action="removeSet" data-i="${i}">− Remove set</button>` : ''}
+      <button class="link" data-action="addSet" data-i="${i}">+ Set</button>
+      ${entry.sets.length > 1 ? `<button class="link muted-link" data-action="removeSet" data-i="${i}">− Set</button>` : ''}
+      <span class="spacer"></span>
+      <button class="link" data-action="toggleNote" data-i="${i}">${entry.athleteNote ? 'Edit note' : '+ Note'}</button>
     </div>
-    <label class="note-field"><span>My note</span>
-      <textarea rows="1" placeholder="How did it feel? Any pain?" data-action="entryNote" data-i="${i}">${esc(entry.athleteNote || '')}</textarea></label>
+    <label class="note-field" ${entry.athleteNote ? '' : 'hidden'} id="note-${i}"><span>My note</span>
+      <textarea rows="2" placeholder="How did it feel? Any pain?" data-action="entryNote" data-i="${i}">${esc(entry.athleteNote || '')}</textarea></label>
   </article>`;
 }
 
@@ -82,67 +138,58 @@ function rpeButtons(val) {
   return h + '</div>';
 }
 
-export function today_(root, { id }, query) {
+// The workout page: every exercise in order with boxes for weight and reps.
+export function session(root, { id, date }) {
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
-  const iso = query.get('d') || today();
-  const plans = store.plannedOn(id, iso);
-  let log = store.logFor(id, iso);
-
-  let body = '';
-  if (log) {
-    const sub = log.blockId ? `${store.get('blocks', log.blockId)?.name || ''} · week ${log.week + 1}` : '';
-    body = `
-      <div class="session-head">
-        <div><h2>${esc(log.name)}</h2><p class="muted">${esc(sub)}</p></div>
-        <button class="chip" data-action="switch">Switch workout</button>
-      </div>
-      ${totalsBar(log)}
-      ${log.entries.map((e, i) => entryCard(log, e, i)).join('')}
-      <button class="btn ghost wide" data-action="addExercise">+ Add an exercise</button>
-      <section class="card finish">
-        <h3>Finish session</h3>
-        <p class="muted">How hard was the whole session? (1 = very easy, 10 = max effort)</p>
-        ${rpeButtons(log.sessionRpe)}
-        <label class="field-row"><span>Minutes</span><input type="number" inputmode="numeric" min="0" value="${log.minutes ?? ''}" data-action="minutes" aria-label="Session minutes"></label>
-        <label class="note-field"><span>Session note for coach</span>
-          <textarea rows="2" placeholder="Sleep, soreness, anything coach should know" data-action="sessionNote">${esc(log.note || '')}</textarea></label>
-        <button class="btn wide" data-action="finish">${log.finished ? 'Saved ✓ (tap to update)' : 'Finish and save'}</button>
-      </section>`;
-  } else if (plans.length) {
-    const p = plans[0];
-    const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.settings().rounding);
-    const ex = store.exercisesById();
-    body = `
-      <div class="session-head"><div><h2>${esc(s.name)}</h2><p class="muted">${esc(p.block.name)} · week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · deload' : ''}</p></div>
-        <button class="chip" data-action="switch">Switch workout</button></div>
-      <ul class="preview">${s.items.map((it) => `<li><b>${esc(ex[it.exerciseId]?.name || it.exerciseId)}</b>
-        <span>${it.sets.length} × ${prescriptionText(it.sets[0])}</span></li>`).join('')}</ul>
-      <button class="btn wide" data-action="start">Start workout</button>`;
-  } else {
-    body = `<div class="empty"><p><b>Nothing scheduled.</b> Rest day, or pick a session to do today.</p>
-      <button class="btn" data-action="switch">Pick a workout</button></div>`;
+  const plans = store.plannedOn(id, date);
+  let log = store.logFor(id, date);
+  if (!log) {
+    if (!plans.length) { location.hash = `#/athlete/${id}?d=${date}`; return; }
+    log = store.startLog(id, date, plans[0]);
   }
+  const block = store.get('blocks', log.blockId);
+  const labels = orderLabels(log.entries);
 
   root.innerHTML = `
-    <header class="page-head"><h1>${esc(athlete.name.split(' ')[0])}'s training</h1><p class="muted">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</p></header>
-    ${dateStrip(id, iso)}
-    <div id="session">${body}</div>`;
+    <header class="page-head">
+      <a class="back" href="#/athlete/${id}?d=${date}">‹ ${fmtDate(date)}</a>
+      <span class="kicker">${esc(block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
+      <div class="row between"><h1>${esc(log.name)}</h1><button class="chip" data-action="switch">Switch</button></div>
+    </header>
+    ${log.entries.map((e, i) => entryCard(log, e, i, labels[i])).join('')}
+    <button class="btn ghost wide" data-action="addExercise">+ Add an exercise</button>
+    <section class="finish">
+      <h2>Finish</h2>
+      <p class="muted">How hard was the whole session? 1 is very easy, 10 is max effort.</p>
+      ${rpeButtons(log.sessionRpe)}
+      <label class="field-row"><span>Minutes</span><input type="number" inputmode="numeric" min="0" value="${log.minutes ?? ''}" data-action="minutes" aria-label="Session minutes"></label>
+      <label class="note-field"><span>Note for coach</span>
+        <textarea rows="2" placeholder="Sleep, soreness, anything coach should know" data-action="sessionNote">${esc(log.note || '')}</textarea></label>
+      <button class="btn wide" data-action="finish">${log.finished ? 'Update workout' : 'Finish workout'}</button>
+    </section>`;
 
-  const rerender = () => today_(root, { id }, query);
-  const persist = () => { store.saveLog(log); const t = $('#live-totals', root); if (t) t.outerHTML = totalsBar(log); };
+  const rerender = () => { const y = window.scrollY; session(root, { id, date }); window.scrollTo(0, y); };
+  const persist = () => store.saveLog(log);
+  const markEntry = (i) => root.querySelector(`#entry-${i}`)?.classList.toggle('complete', log.entries[i].sets.every((s) => s.done));
 
   bindActions(root, {
-    goDate: (el) => { location.hash = `#/athlete/${id}?d=${el.dataset.date}`; },
-    start: () => { log = store.startLog(id, iso, plans[0]); rerender(); },
     toggleSet: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
       s.done = !s.done;
+      // Ticking a set with empty boxes logs it exactly as prescribed.
+      if (s.done) {
+        if (s.reps == null) s.reps = s.targetReps ?? null;
+        if (s.weight == null) s.weight = s.targetWeight ?? null;
+        const row = el.closest('.set');
+        const w = row.querySelector('[data-k=weight]'); if (w && s.weight != null) w.value = s.weight;
+        const r = row.querySelector('[data-k=reps]'); if (r && s.reps != null) r.value = s.reps;
+      }
       el.setAttribute('aria-pressed', s.done);
       el.closest('.set').classList.toggle('done', s.done);
+      markEntry(el.dataset.i);
       persist();
     },
-    allDone: (el) => { log.entries[el.dataset.i].sets.forEach((s) => { s.done = true; }); persist(); rerender(); },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
       s[el.dataset.k] = el.value === '' ? null : Number(el.value);
@@ -150,13 +197,17 @@ export function today_(root, { id }, query) {
     },
     addSet: (el) => {
       const sets = log.entries[el.dataset.i].sets;
-      const last = sets[sets.length - 1] || { reps: 5, weight: null };
-      sets.push({ ...last, done: false });
+      const last = sets[sets.length - 1] || {};
+      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, reps: null, weight: null, done: false });
       persist(); rerender();
     },
     removeSet: (el) => { log.entries[el.dataset.i].sets.pop(); persist(); rerender(); },
+    toggleNote: (el) => { const n = root.querySelector(`#note-${el.dataset.i}`); n.hidden = false; n.querySelector('textarea').focus(); },
     entryNote: (el) => { log.entries[el.dataset.i].athleteNote = el.value; persist(); },
-    sessionRpe: (el) => { log.sessionRpe = Number(el.dataset.v); persist(); rerender(); },
+    sessionRpe: (el) => {
+      log.sessionRpe = Number(el.dataset.v); persist();
+      root.querySelectorAll('.rpe button').forEach((b) => b.classList.toggle('on', b === el));
+    },
     minutes: (el) => { log.minutes = el.value === '' ? null : Number(el.value); persist(); },
     sessionNote: (el) => { log.note = el.value; persist(); },
     finish: () => {
@@ -170,18 +221,18 @@ export function today_(root, { id }, query) {
       }
       if (prs.length) store.put('athletes', athlete);
       store.saveLog(log);
-      toast(prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : 'Session saved');
-      rerender();
+      toast(prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : 'Workout saved');
+      location.hash = `#/athlete/${id}?d=${date}`;
     },
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addExercise: () => pickExerciseSheet((exId) => {
-      log.entries.push({ exerciseId: exId, note: '', sets: [{ reps: 5, weight: null, done: false }], addedByAthlete: true });
+      log.entries.push({ exerciseId: exId, note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
     }),
-    switch: () => switchSheet(id, iso, (plan) => {
-      if (log && log.entries.some((e) => e.sets.some((s) => s.done)) && !confirm('Replace the sets you already logged today?')) return;
-      if (log) store.del('logs', log.id);
-      log = store.startLog(id, iso, plan);
+    switch: () => switchSheet(id, date, (plan) => {
+      if (log.entries.some((e) => e.sets.some((s) => s.done)) && !confirm('Replace the sets you already logged today?')) return;
+      store.del('logs', log.id);
+      log = store.startLog(id, date, plan);
       log.switchedFrom = plans[0] ? { week: plans[0].week, dayIndex: plans[0].dayIndex } : null;
       store.saveLog(log);
       closeSheet(); rerender();
@@ -205,7 +256,8 @@ function swapSheet(log, i, done) {
         const to = b.dataset.pick;
         entry.swappedFrom = to === original ? undefined : original;
         entry.exerciseId = to;
-        if (store.get('exercises', to)?.loaded === false) entry.sets.forEach((s) => { s.weight = null; });
+        // The old weight belongs to the old exercise; keep reps, clear the load.
+        entry.sets.forEach((s) => { if (!s.done) { s.weight = null; s.targetWeight = null; } });
         closeSheet(); done();
       }
       if (e.target.closest('[data-other]')) pickExerciseSheet((to) => { entry.swappedFrom = original; entry.exerciseId = to; done(); });
@@ -263,13 +315,15 @@ export function week(root, { id }, query) {
   const u = store.settings().units;
   const t = cur.done;
   const patterns = Object.keys(PATTERN_LABEL).filter((p) => (t.setsByPattern[p] || cur.planned.setsByPattern[p]));
+  const sessions = cur.days.filter((d) => d.log);
 
   root.innerHTML = `
-    <header class="page-head"><h1>Week of ${fmtDate(mon, { month: 'short', day: 'numeric' })}</h1>
+    <header class="page-head"><span class="kicker">Analytics</span>
+      <div class="row between"><h1>Week of ${fmtDate(mon, { month: 'short', day: 'numeric' })}</h1>
       <div class="row gap">
-        <a class="chip" href="#/athlete/${id}/week?d=${addDays(mon, -7)}">‹ Prev</a>
-        <a class="chip" href="#/athlete/${id}/week?d=${addDays(mon, 7)}">Next ›</a>
-      </div></header>
+        <a class="chip" href="#/athlete/${id}/week?d=${addDays(mon, -7)}" aria-label="Previous week">‹</a>
+        <a class="chip" href="#/athlete/${id}/week?d=${addDays(mon, 7)}" aria-label="Next week">›</a>
+      </div></div></header>
     <div class="stats">
       ${stat('Sessions', cur.sessionsDone, null, ` / ${cur.sessionsPlanned}`)}
       ${stat('Tonnage', t.tonnage, prev.done.tonnage, ` ${u}`)}
@@ -280,6 +334,12 @@ export function week(root, { id }, query) {
       ${t.sprintMeters || cur.planned.sprintMeters ? stat('Sprint meters', t.sprintMeters, prev.done.sprintMeters, ' m') : ''}
       ${t.throws ? stat('Throws', t.throws, prev.done.throws) : ''}
     </div>
+    <section class="card"><h3>Each workout</h3>
+      ${sessions.length ? `<div class="scroll-x"><table class="tbl compact"><thead><tr><th>Workout</th><th>${u}</th><th>Contacts</th><th>Sets</th><th>RPE</th></tr></thead><tbody>
+        ${sessions.map((d) => `<tr><td><a href="#/athlete/${id}/session/${d.iso}">${esc(d.log.name)}</a><br><small class="muted">${fmtDate(d.iso)}</small></td>
+          <td>${fmt(d.totals.tonnage)}</td><td>${fmt(d.totals.contacts)}</td><td>${fmt(d.totals.sets)}</td><td>${d.log.sessionRpe ?? '–'}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted">No workouts logged this week yet.</p>'}
+    </section>
     <section class="card">
       <h3>Planned vs done</h3>
       <table class="tbl"><thead><tr><th></th><th>Planned</th><th>Done</th></tr></thead><tbody>
