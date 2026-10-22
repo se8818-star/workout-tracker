@@ -9,6 +9,12 @@ export function fmt(n, digits = 0) {
   return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+// The lb / kg switch shown on pages with weights. Views handle data-action="setUnits".
+export function unitSeg(u) {
+  return `<div class="seg unit-seg" role="group" aria-label="Weight unit">${['lb', 'kg'].map((v) =>
+    `<button class="${u === v ? 'on' : ''}" data-action="setUnits" data-v="${v}" aria-pressed="${u === v}">${v}</button>`).join('')}</div>`;
+}
+
 export function fmtDate(iso, opts = { weekday: 'short', month: 'short', day: 'numeric' }) {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, opts);

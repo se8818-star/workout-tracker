@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as calc from '../js/calc.js';
 import {
   prescribedWeight, prescribedSets, prescribedReps, buildSession, sessionTotals, e1rm,
   scheduledOn, weekStart, parseQuickEntry, tagPctOfMax, sessionLoad,
@@ -111,4 +112,23 @@ test('time and no-measure items build the right sets', () => {
   assert.equal(s.items[0].sets[0].reps, null);
   assert.equal(s.items[1].sets.length, 1);
   assert.equal(s.items[1].sets[0].reps, null);
+});
+
+test('weights convert between lb and kg and back', () => {
+  assert.equal(calc.toUnit(calc.fromUnit(100, 'kg'), 'kg'), 100);
+  assert.equal(calc.fromUnit(135, 'lb'), 135);
+  assert.equal(calc.toUnit(null, 'kg'), null);
+  // A kg device rounds prescribed loads to whole 2.5 kg steps.
+  const item = { exerciseId: 'x', sets: 1, reps: 5, pct: 80 };
+  const lb = calc.prescribedWeight(item, { maxes: { x: 300 } }, 0, { deloadWeek: null }, 2.5 * calc.LB_PER_KG);
+  assert.equal(Math.round(calc.toUnit(lb, 'kg') * 10) / 10, 110);
+});
+
+test('breaths are counted like reps but never loaded or added to rep totals', () => {
+  const block = { deloadWeek: null, days: [{ name: 'A', items: [{ exerciseId: 'b', sets: 2, reps: 6, measure: 'breaths', weight: 45 }] }] };
+  const s = calc.buildSession(block, 0, 0, { maxes: {} });
+  assert.deepEqual(s.items[0].sets.map((x) => [x.reps, x.weight]), [[6, null], [6, null]]);
+  const t = calc.sessionTotals(s, { b: { pattern: 'core', loaded: false } }, false);
+  assert.equal(t.sets, 2);
+  assert.equal(t.reps, 0);
 });

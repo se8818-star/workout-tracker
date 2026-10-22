@@ -63,8 +63,8 @@ const FALL_2026_EXERCISES = [
   X('sa-rear-delt-fly', 'SA rear delt fly', 'pull', 'upper'),
 ];
 
-// The warmup is its own section of exercises at the top of each day, so each
-// piece can be edited. Rows the sheet gave no sets for default to 1 set.
+// The sheet's warmup is a separate saved warmup; a coach loads it into any
+// program day's warmup section. Rows the sheet gave no sets for default to 1 set.
 const w = (exerciseId, sets, reps, opts = {}) => ({ ...it(exerciseId, sets, reps, opts), warmup: true });
 const warm = () => [
   w('foam-roll', 1, null, { measure: 'none', note: 'IT band/TFL, quads, hip flexors, hamstrings, adductors, lats, pecs, T-spine, foot arches (baseball)' }),
@@ -89,7 +89,6 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 1: Full body',
       items: [
-        ...warm(),
         it('pec-fly', 3, 10, { range: '10-12', rir: '1/0', rest: '3-5 min', tempo: '3-1-X-1', note: '3 second eccentric + 1 second pause at full stretch + 1 second pause at peak contraction on every rep' }),
         it('sa-cable-row', 3, 8, { range: '8-10', rest: '3-5 min (4-5 min from week 7)', note: '2 second hold at fully stretched position / 1 second hold at peak contraction on every rep' }),
         it('sa-leg-press', 3, 8, { range: '8-10', rest: '2 min', note: 'Rest pause set, fail 3 total times' }),
@@ -104,7 +103,6 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 2: Full body',
       items: [
-        ...warm(),
         it('wide-lat-pulldown', 3, 8, { range: '8-10', rir: 1, rest: '3-5 min', note: "Scaps should retract when all the way at the bottom position and shoulders shouldn't round forwards" }),
         it('incline-db-bench', 3, 8, { range: '8-10', rir: 0, rest: '3-5 min', note: 'Keep ribs down and elbows tucked, but not all the way at your sides' }),
         it('sl-quad-extension', 3, 8, { range: '8-10', rir: 0, rest: '3-5 min', note: 'FULL ROM' }),
@@ -119,7 +117,6 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 3: Legs',
       items: [
-        ...warm(),
         it('front-squat', 3, null, { rir: 1, rest: '3-5 min', note: 'Feet hip width apart. Slight bend at the knees but I want you to feel this in your hamstrings. Keep the bar close to your body' }),
         it('seated-leg-curl', 3, 6, { range: '6-10', rir: 0, rest: '3-5 min', note: 'Fully contract & squeeze as hard as possible on every rep here. Fully control the eccentric, fight the rep on the way down. Briefly pause at the bottom of the rep while your quads are in the fully stretched position, keeping tension on them; the weight should not be resting on the stack here. Keep your butt down on the seat & hold yourself down.' }),
         it('adductor-machine', 3, 8, { range: '8-10', rest: '3-5 min', note: '1 second pause at bottom' }),
@@ -131,7 +128,6 @@ const FALL_2026_BLOCK = {
     {
       name: 'Day 4: Upper',
       items: [
-        ...warm(),
         it('incline-db-bench', 3, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: ARM_CUE }),
         it('machine-row-kelso', 3, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: "This HAS to get full retraction especially when you do kelsos. And it has to be back and down. Not up. Otherwise you'll be very sad" }),
         it('katana-tricep-ext', 2, 8, { range: '8-10', rir: '1/0', rest: '3-5 min', note: ARM_CUE }),
@@ -150,8 +146,16 @@ export const TEMPLATES = [
   {
     id: 'fall-2026',
     name: 'Fall 2026',
-    about: '10 weeks, 4 days: two full body days, legs, upper. A 12-exercise warmup section on each day, plus holds and RIR targets from the Fall 2026 sheet.',
+    about: '10 weeks, 4 days: two full body days, legs, upper, with holds and RIR targets from the Fall 2026 sheet. Load the Fall 2026 warmup into its days.',
     block: FALL_2026_BLOCK,
     exercises: FALL_2026_EXERCISES,
+  },
+  {
+    id: 'fall-2026-warmup',
+    kind: 'warmup',
+    name: 'Fall 2026 warmup',
+    about: '12 exercises from the Warmup tab of the Fall 2026 sheet.',
+    block: { name: 'Fall 2026 warmup', kind: 'warmup', weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items: warm() }] },
+    exercises: FALL_2026_EXERCISES.filter((e) => warm().some((x) => x.exerciseId === e.id)),
   },
 ];
