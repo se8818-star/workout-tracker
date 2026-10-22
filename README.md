@@ -36,7 +36,7 @@ cd workout-tracker
 python3 -m http.server 8080
 ```
 
-Open http://localhost:8080 and pick the coach or one of the demo athletes.
+Open http://localhost:8080 and pick the coach (add athletes from the team page) or an athlete.
 
 Run the tests for the training math with `node --test`.
 
@@ -61,7 +61,7 @@ sign in with their email, enter the code, and tap Share → Add to Home Screen.
 | File | What it does |
 | --- | --- |
 | `js/calc.js` | All the training math (prescriptions, progressions, tonnage, contacts, zones, scheduling, quick-entry parser) |
-| `js/store.js` | Local data store (works offline), demo data |
+| `js/store.js` | Local data store (works offline), starter data |
 | `js/sync.js` | Optional Supabase sign-in and sync |
 | `js/athlete.js`, `js/coach.js` | The screens |
 | `js/seed.js` | Starter exercise library and demo program |

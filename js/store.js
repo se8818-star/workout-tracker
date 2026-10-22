@@ -2,9 +2,9 @@
 // works offline and in demo mode. When Supabase is configured (js/config.js),
 // sync.js mirrors these same records to the database.
 
-import { SEED_EXERCISES, SEED_BLOCK, SEED_ATHLETES } from './seed.js';
+import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, scheduledOn, toISO, addDays, weekStart, tagPctOfMax } from './calc.js';
+import { buildSession, scheduledOn, tagPctOfMax } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -21,7 +21,8 @@ function save() {
   for (const fn of listeners) fn();
 }
 
-// Demo mode seeds a sample team. Cloud mode starts empty and fills from Supabase.
+// Local mode starts with the exercise library and a sample program, but no
+// athletes. Cloud mode starts empty and fills from Supabase.
 let demo = true;
 export function load({ cloud = false } = {}) {
   demo = !cloud;
@@ -142,38 +143,9 @@ export function saveLog(log) {
   return put('logs', log);
 }
 
-// ---- demo data ----
+// ---- starter data ----
 
 function seedDemo() {
   for (const e of SEED_EXERCISES) db.exercises[e.id] = { ...e };
   db.blocks[SEED_BLOCK.id] = structuredClone(SEED_BLOCK);
-  for (const a of SEED_ATHLETES) db.athletes[a.id] = structuredClone(a);
-
-  // Start the block on the Monday one week ago so there's history to look at.
-  const today = toISO(new Date());
-  const start = addDays(weekStart(today), -7);
-  for (const a of SEED_ATHLETES) {
-    db.assignments[`asg-${a.id}`] = { id: `asg-${a.id}`, athleteId: a.id, blockId: SEED_BLOCK.id, startDate: start, weekdays: [0, 2, 4] };
-  }
-
-  // Fill in last week's logs (and this week's up to yesterday) with small variations.
-  const notes = ['Felt fast today', 'Lower back a little tight on RDLs', '', 'Great session', 'Slept badly, took it easy'];
-  let n = 0;
-  for (let iso = start; iso < today; iso = addDays(iso, 1)) {
-    for (const a of SEED_ATHLETES) {
-      const asg = db.assignments[`asg-${a.id}`];
-      const at = scheduledOn(asg, SEED_BLOCK, iso);
-      if (!at) continue;
-      if (a.id === 'ath-2' && n % 4 === 3) { n++; continue; } // one athlete skips now and then
-      const s = buildSession(SEED_BLOCK, at.dayIndex, at.week, a, 5);
-      const entries = s.items.map((it) => tagPctOfMax({ ...it, sets: it.sets.map((x) => ({ ...x, done: true })) }, a, db.exercises));
-      db.logs[logId(a.id, iso)] = {
-        id: logId(a.id, iso), athleteId: a.id, date: iso, assignmentId: asg.id, blockId: SEED_BLOCK.id,
-        week: at.week, dayIndex: at.dayIndex, name: s.name, entries,
-        sessionRpe: 6 + (n % 3), minutes: 60 + (n % 3) * 5, note: notes[n % notes.length], finished: true,
-        updatedAt: new Date().toISOString(),
-      };
-      n++;
-    }
-  }
 }
