@@ -412,7 +412,7 @@ export function pickExerciseSheet(onPick, { allowNew = false } = {}) {
     });
     w.addEventListener('click', (e) => {
       if (e.target.closest('[data-new]')) {
-        const x = store.put('exercises', { id: store.uid('ex'), name: q.value.trim(), pattern: 'other', body: 'full', loaded: false, alts: [] });
+        const x = store.put('exercises', { id: store.uid('ex'), name: q.value.trim(), pattern: 'other', body: 'full', loaded: true, alts: [] });
         toast(`Added "${x.name}" to the library. Set its movement type there.`);
         closeSheet(); onPick(x.id); return;
       }
