@@ -51,6 +51,24 @@ drop trigger if exists records_stamp on records;
 create trigger records_stamp before insert or update on records
   for each row execute function stamp_record();
 
+-- A finished workout is never overwritten by an unfinished copy from another
+-- device (e.g. a coach's phone that hadn't caught up yet). Deleting it still works.
+create or replace function keep_finished_log() returns trigger
+language plpgsql as $$
+begin
+  if old.kind = 'logs' and not old.deleted and coalesce((old.data->>'finished')::boolean, false)
+     and not new.deleted and not coalesce((new.data->>'finished')::boolean, false) then
+    -- Keep the finished version. records_stamp (which runs after this) gives it a
+    -- new updated_at, so the device that sent the stale copy pulls it back.
+    return old;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists records_keep_finished on records;
+create trigger records_keep_finished before update on records
+  for each row execute function keep_finished_log();
+
 alter table teams enable row level security;
 alter table members enable row level security;
 alter table records enable row level security;
