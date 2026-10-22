@@ -389,3 +389,10 @@ textarea { resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Per-set kg/lb tag inside the weight box */
+.wfield input { padding-right: 26px; }
+.unit-btn { position: absolute; top: 3px; right: 3px; min-width: 24px; min-height: 22px; padding: 2px 4px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); font: 700 0.6rem var(--mono); cursor: pointer; }
+.set.done .unit-btn { background: var(--card); }
+.unit-field > span { display: block; font: 600 0.56rem var(--mono); text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.unit-field .seg { margin-top: 0; }
