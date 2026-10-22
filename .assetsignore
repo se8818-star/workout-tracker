@@ -1,0 +1,13 @@
+# Files Cloudflare should not publish with the app
+.git
+.gitignore
+.assetsignore
+.wrangler
+node_modules
+wrangler.jsonc
+package.json
+package-lock.json
+bun.lock*
+README.md
+supabase
+tests
