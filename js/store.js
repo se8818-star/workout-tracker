@@ -128,17 +128,22 @@ export function logsFor(athleteId) {
   return all('logs').filter((l) => l.athleteId === athleteId).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Most recent logged sets for an exercise before a date ("last time").
-export function lastTime(athleteId, exerciseId, beforeIso) {
-  const logs = logsFor(athleteId).filter((l) => l.date < beforeIso && l.finished).reverse();
-  for (const l of logs) {
-    const e = l.entries.find((x) => x.exerciseId === exerciseId);
-    if (e) {
-      const done = e.sets.filter((s) => s.done);
-      if (done.length) return { date: l.date, sets: done };
+// Every finished session where the athlete logged sets of an exercise before
+// a date, newest first: [{date, unit, sets, note}].
+export function exerciseHistory(athleteId, exerciseId, beforeIso) {
+  const out = [];
+  for (const l of logsFor(athleteId).filter((x) => x.date < beforeIso && x.finished).reverse()) {
+    for (const e of l.entries.filter((x) => x.exerciseId === exerciseId)) {
+      const done = e.sets.filter((x) => x.done);
+      if (done.length) out.push({ date: l.date, unit: e.unit, measure: e.measure || 'reps', sets: done, note: e.athleteNote || '' });
     }
   }
-  return null;
+  return out;
+}
+
+// Most recent logged sets for an exercise before a date ("last time").
+export function lastTime(athleteId, exerciseId, beforeIso) {
+  return exerciseHistory(athleteId, exerciseId, beforeIso)[0] || null;
 }
 
 // Start (or reopen) a log for a planned session.

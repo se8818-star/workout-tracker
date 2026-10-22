@@ -207,6 +207,16 @@ select.dd-native { display: none; }
 .entry-title { flex: 1; min-width: 0; }
 .entry h3 { margin: 2px 0 4px; font-size: 1.4rem; font-stretch: 65%; }
 .tags, .last { color: var(--muted); font-family: var(--mono); font-size: 0.66rem; }
+button.last { display: block; text-align: left; padding: 2px 0; background: none; border: 0; cursor: pointer; }
+button.last b { color: var(--track); white-space: nowrap; }
+.hist-best { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px; margin-bottom: 12px; background: var(--ink); color: var(--paper); }
+.hist-best b { color: var(--hi); font-family: var(--mono); grid-row: span 2; align-self: center; font-size: 1.1rem; }
+.hist-best span { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase; }
+.hist { list-style: none; padding: 0; margin: 0; }
+.hist > li { padding: 10px 0; }
+.hist > li + li { border-top: var(--hair); }
+.hist-date { font-weight: 700; margin-bottom: 4px; }
+.hist-sets { margin: 0; padding-left: 2.2em; font-family: var(--mono); font-size: 0.85rem; }
 .coach-note { white-space: pre-line; border-left: 4px solid var(--track); background: #f7e3dc; padding: 6px 10px; font-size: 0.95rem; margin: 12px 0 4px; }
 .set-head, .set { display: grid; grid-template-columns: 26px 1fr 1fr 0.8fr 48px; gap: 8px; align-items: center; }
 .set-head.no-load, .set.no-load { grid-template-columns: 26px 1fr 1fr 48px; }
