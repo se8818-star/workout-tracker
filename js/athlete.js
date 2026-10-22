@@ -4,6 +4,7 @@ import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, PATTERN_LABEL } from './ui.js';
+import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
 
@@ -144,7 +145,8 @@ function entryCard(log, entry, i, label) {
       ${loaded ? `<div class="field wfield"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight, su(s)) ?? ''}" placeholder="${store.showW(s.targetWeight, su(s)) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight in ${su(s)}, set ${j + 1}"><button class="unit-btn" data-action="setUnit" data-i="${i}" data-j="${j}" aria-label="Weight unit for set ${j + 1}: ${su(s)}. Tap to switch">${su(s)}</button></div>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
-    </div>`).join('');
+    </div>${uploading.has(`${log.id}/${i}/${j}`) ? `<div class="set-video"><span class="muted small">Uploading set ${j + 1} video…</span></div>`
+      : videoFresh(s.video) ? `<div class="set-video"><button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ Set ${j + 1} video</button><button class="link muted-link" data-action="removeVideo" data-i="${i}" data-j="${j}">Remove</button></div>` : ''}`).join('');
   return `<article class="entry ${entry.warmup ? 'warm' : ''} ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
     <header>
       <span class="order">${label}</span>
@@ -161,6 +163,7 @@ function entryCard(log, entry, i, label) {
       ${measure === 'none' ? '' : `<button class="link" data-action="addSet" data-i="${i}">+ Set</button>`}
       ${entry.sets.length > 1 ? `<button class="link muted-link" data-action="removeSet" data-i="${i}">− Set</button>` : ''}
       <span class="spacer"></span>
+      <button class="link" data-action="addVideo" data-i="${i}">+ Video</button>
       <button class="link" data-action="toggleNote" data-i="${i}">${entry.athleteNote ? 'Edit note' : '+ Note'}</button>
     </div>
     <label class="note-field" ${entry.athleteNote ? '' : 'hidden'} id="note-${i}"><span>My note</span>
@@ -278,6 +281,33 @@ export function session(root, { id, date, warm = false }) {
       location.hash = `#/athlete/${id}?d=${date}`;
     },
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
+    addVideo: (el) => {
+      if (!videosEnabled()) return toast('Videos need the online app, not the demo.');
+      const i = Number(el.dataset.i), sets = log.entries[i].sets;
+      const go = (j) => pickVideo(async (file, secs) => {
+        const s = log.entries[i].sets[j], key = `${log.id}/${i}/${j}`;
+        uploading.add(key); rerender();
+        try {
+          const path = await uploadVideo(id, file);
+          const old = s.video?.path;
+          s.video = { path, at: new Date().toISOString(), secs: secs || null };
+          if (old) removeVideos([old]);
+          toast('Video added. Your coach can watch it.');
+        } catch (e) { toast(`Couldn't upload: ${e.message}`); }
+        uploading.delete(key); persist(); rerender();
+      });
+      if (sets.length === 1) return go(0);
+      sheet('Video for which set?', `<ul class="pick">${sets.map((s, j) => `<li><button data-j="${j}">Set ${j + 1}${videoFresh(s.video) ? ' <small>has a video (replace)</small>' : ''}</button></li>`).join('')}</ul>`, (w) => {
+        w.addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b) { closeSheet(); go(Number(b.dataset.j)); } });
+      });
+    },
+    removeVideo: async (el) => {
+      const s = log.entries[el.dataset.i].sets[el.dataset.j];
+      if (!await ask('Your coach won\'t be able to watch it anymore.', { title: 'Remove this video?', ok: 'Remove video', danger: true })) return;
+      await removeVideos([s.video.path]);
+      delete s.video; persist(); rerender();
+    },
+    playVideo: (el) => videoSheet(el.dataset.path),
     addExercise: () => pickExerciseSheet((exId) => {
       log.entries.push({ exerciseId: exId, unit: store.unit(), note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
@@ -290,6 +320,47 @@ export function session(root, { id, date, warm = false }) {
       store.saveLog(log);
       closeSheet(); rerender();
     }),
+  });
+}
+
+// Sets with a clip on its way up (kept off the log so a closed tab can't leave it stuck).
+const uploading = new Set();
+
+// Pick or record a clip, checking length and size before it uploads.
+function pickVideo(onFile) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'video/*';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > VIDEO_MAX_MB * 1024 * 1024) return toast(`That video is too big (over ${VIDEO_MAX_MB} MB). Keep it under ${VIDEO_MAX_SECS} seconds.`);
+    const secs = await videoSecs(file);
+    if (secs > VIDEO_MAX_SECS + 1) return toast(`Keep it under ${VIDEO_MAX_SECS} seconds. Trim it in your Photos app first.`);
+    onFile(file, Number.isFinite(secs) ? Math.round(secs) : null);
+  });
+  input.click();
+}
+
+// Length of a clip, or NaN when the browser can't read it (the size check still applies).
+function videoSecs(file) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video'), url = URL.createObjectURL(file);
+    let settled = false;
+    const done = (d) => { if (settled) return; settled = true; URL.revokeObjectURL(url); resolve(d); };
+    v.preload = 'metadata'; v.muted = true;
+    v.onloadedmetadata = () => done(v.duration);
+    v.onerror = () => done(NaN);
+    setTimeout(() => done(NaN), 8000);
+    v.src = url;
+  });
+}
+
+// Play a form-check clip in a sheet (athlete or coach).
+export function videoSheet(path) {
+  sheet('Form video', `<video class="form-video" controls playsinline autoplay></video>
+    <p class="muted small">Videos are kept for ${VIDEO_DAYS} days.</p>`, async (w) => {
+    try { w.querySelector('video').src = await videoUrl(path); } catch (e) { toast(`Couldn't load the video: ${e.message}`); }
   });
 }
 

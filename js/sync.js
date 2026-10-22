@@ -41,6 +41,7 @@ export async function startSync(render) {
     await syncNow();
     store.onChange(schedulePush);
     setInterval(syncNow, 30000);
+    if (membership.role === 'coach') sweepVideos().catch((e) => console.warn(e));
     window.addEventListener('online', syncNow);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
   }
@@ -296,6 +297,57 @@ export async function removeAthleteLogin(athleteId) {
   if (!sb || !membership) return;
   const { error } = await sb.rpc('remove_athlete', { t: membership.team_id, aid: athleteId });
   if (error) throw error;
+}
+
+// ---- form-check videos ----
+// Clips live in the private Storage bucket `form-videos` under
+// <team id>/<athlete id>/, and a set keeps { path, at, secs } in `set.video`.
+// They're kept VIDEO_DAYS days: the app hides older ones and the coach's app
+// deletes the files (Storage can only delete through its API, not SQL).
+export const VIDEO_DAYS = 14;
+export const VIDEO_MAX_SECS = 30;
+export const VIDEO_MAX_MB = 50;
+const BUCKET = 'form-videos';
+export const videosEnabled = () => Boolean(sb && membership);
+export const videoFresh = (v) => Boolean(v?.path) && Date.now() - new Date(v.at).getTime() < VIDEO_DAYS * 86400000;
+
+export async function uploadVideo(athleteId, file) {
+  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+  const path = `${membership.team_id}/${athleteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || 'video/mp4', upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+export async function videoUrl(path) {
+  const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function removeVideos(paths) {
+  if (!sb || !paths.length) return;
+  const { error } = await sb.storage.from(BUCKET).remove(paths);
+  if (error) console.warn(error);
+}
+
+// Coach's app, at most once a day: delete clips older than VIDEO_DAYS,
+// including ones whose log was since deleted.
+async function sweepVideos() {
+  const KEY = 'wt-video-sweep';
+  try { if (Date.now() - Number(localStorage.getItem(KEY) || 0) < 86400000) return; } catch { /* private mode */ }
+  const cutoff = Date.now() - VIDEO_DAYS * 86400000;
+  const store_ = sb.storage.from(BUCKET);
+  const { data: folders, error } = await store_.list(membership.team_id, { limit: 1000 });
+  if (error) { console.warn(error); return; }
+  const old = [];
+  for (const f of folders || []) {
+    if (f.id) continue; // a file at the top level; athletes' clips are in folders
+    const { data: files } = await store_.list(`${membership.team_id}/${f.name}`, { limit: 1000 });
+    for (const x of files || []) if (x.id && new Date(x.created_at).getTime() < cutoff) old.push(`${membership.team_id}/${f.name}/${x.name}`);
+  }
+  for (let i = 0; i < old.length; i += 100) await removeVideos(old.slice(i, i + 100));
+  try { localStorage.setItem(KEY, String(Date.now())); } catch { /* private mode */ }
 }
 
 // Set or change the signed-in account's password (More page).
