@@ -73,7 +73,7 @@ export function athlete(root, { id }) {
   const loaded = store.all('exercises').filter((x) => x.loaded).sort((x, y) => x.name.localeCompare(y.name));
   const asg = store.assignmentsFor(id);
   root.innerHTML = `
-    <header class="page-head"><h1>${esc(a.name)}</h1><p class="muted">${esc(a.group || '')}</p>
+    <header class="page-head"><a class="back" href="#/coach">‹ Team</a><h1>${esc(a.name)}</h1><p class="muted">${esc(a.group || '')}</p>
       <div class="row gap"><a class="chip" href="#/athlete/${id}">Open athlete view</a><a class="chip" href="#/athlete/${id}/week">Weekly numbers</a></div></header>
     <div class="stats">
       ${stat('Sessions', w.sessionsDone, null, ` / ${w.sessionsPlanned}`)}

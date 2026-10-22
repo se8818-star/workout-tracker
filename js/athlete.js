@@ -7,6 +7,13 @@ import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, toast, stat, bars, P
 
 const today = () => toISO(new Date());
 
+// A coach looking at an athlete's pages gets a way back to that athlete's coach page.
+function coachBack(id) {
+  if (store.settings().me?.role !== 'coach') return '';
+  const a = store.get('athletes', id);
+  return `<a class="back" href="#/coach/athlete/${id}">‹ ${esc(a?.name || 'Athlete')}</a>`;
+}
+
 function dateStrip(athleteId, iso) {
   const mon = weekStart(iso);
   let html = '<nav class="date-strip" aria-label="Pick a day">';
@@ -91,7 +98,7 @@ export function today_(root, { id }, query) {
   }
 
   root.innerHTML = `
-    <header class="page-head"><span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+    <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
     ${dateStrip(id, iso)}
     ${body}`;
@@ -373,7 +380,7 @@ export function week(root, { id }, query) {
   const sessions = cur.days.filter((d) => d.log);
 
   root.innerHTML = `
-    <header class="page-head"><span class="kicker">Analytics</span>
+    <header class="page-head">${coachBack(id)}<span class="kicker">Analytics</span>
       <div class="row between"><h1>Week of ${fmtDate(mon, { month: 'short', day: 'numeric' })}</h1>
       <div class="row gap">
         <a class="chip" href="#/athlete/${id}/week?d=${addDays(mon, -7)}" aria-label="Previous week">‹</a>
@@ -426,7 +433,7 @@ export function history(root, { id }) {
   const athlete = store.get('athletes', id);
   const maxes = Object.entries(athlete?.maxes || {});
   root.innerHTML = `
-    <header class="page-head"><h1>History</h1></header>
+    <header class="page-head">${coachBack(id)}<h1>History</h1></header>
     ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}</span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
