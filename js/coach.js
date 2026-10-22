@@ -5,6 +5,7 @@ import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, empt
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet } from './athlete.js';
+import { TEMPLATES } from './templates.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -121,10 +122,25 @@ export function blocks(root) {
     ${list.map((b) => `<div class="card row between">
       <a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}</small></a>
       <div class="row gap"><button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`).join('')}
-    <button class="btn" data-action="new">+ New block</button>`;
+    <button class="btn" data-action="new">+ New block</button>
+    <section class="templates">
+      <h3>Start from a template</h3>
+      ${TEMPLATES.map((t) => `<div class="card row between">
+        <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
+        <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`).join('')}
+    </section>`;
   bindActions(root, {
     new: () => {
       const b = store.put('blocks', { id: store.uid('block'), name: 'New block', weeks: 4, deloadWeek: null, days: [{ name: 'Day 1', items: [] }] });
+      location.hash = `#/coach/block/${b.id}`;
+    },
+    // Copies the template into this team's programs, adding any exercises
+    // the library is missing, then opens it for editing or assigning.
+    useTemplate: (el) => {
+      const t = TEMPLATES.find((x) => x.id === el.dataset.id);
+      for (const e of t.exercises) if (!store.get('exercises', e.id)) store.put('exercises', structuredClone(e));
+      const b = store.put('blocks', { ...structuredClone(t.block), id: store.uid('block') });
+      toast(`Added "${b.name}". Assign it from here when you're ready.`);
       location.hash = `#/coach/block/${b.id}`;
     },
     dup: (el) => {
