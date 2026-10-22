@@ -98,3 +98,17 @@ test('buildSession carries the coach tempo and note to the athlete', () => {
   assert.equal(s.items[0].note, 'Brace');
   assert.equal(s.items[1].tempo, '');
 });
+
+test('time and no-measure items build the right sets', () => {
+  const block = { weeks: 3, days: [{ name: 'A', items: [
+    { exerciseId: 'box', measure: 'time', sets: 3, secs: 30, progression: { type: 'add_secs', step: 5 } },
+    { exerciseId: 'box', measure: 'none', sets: 4, reps: 8 },
+  ] }] };
+  const s = buildSession(block, 0, 2, { maxes: {} });
+  assert.equal(s.items[0].measure, 'time');
+  assert.equal(s.items[0].sets.length, 3);
+  assert.equal(s.items[0].sets[0].secs, 40);
+  assert.equal(s.items[0].sets[0].reps, null);
+  assert.equal(s.items[1].sets.length, 1);
+  assert.equal(s.items[1].sets[0].reps, null);
+});

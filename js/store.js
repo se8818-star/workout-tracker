@@ -132,7 +132,7 @@ export function startLog(athleteId, iso, plan) {
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
     // Prescribed numbers become targets; the boxes start empty for the athlete to fill.
-    entries: s.items.map((it) => ({ ...it, sets: it.sets.map((x) => ({ targetReps: x.reps, targetWeight: x.weight, rpe: x.rpe, reps: null, weight: null, done: false })) })),
+    entries: s.items.map((it) => ({ ...it, sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }

@@ -23,9 +23,19 @@ function dateStrip(athleteId, iso) {
   return html;
 }
 
-function targetText(set) {
-  const reps = set.targetReps ?? set.reps;
+// 75 -> "1:15", 30 -> "30 s"
+export function fmtSecs(n) {
+  if (!n) return '';
+  return n < 60 ? `${n} s` : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+}
+
+function targetText(set, measure) {
   const w = set.targetWeight ?? set.weight;
+  if (measure === 'time') {
+    const t = fmtSecs(set.targetSecs ?? set.secs);
+    return w && t ? `${w} × ${t}` : t;
+  }
+  const reps = set.targetReps ?? set.reps;
   if (w) return `${w} × ${reps}`;
   return reps ? `${reps} rep${reps === 1 ? '' : 's'}` : '';
 }
@@ -97,17 +107,23 @@ function entryCard(log, entry, i, label) {
   const ex = store.get('exercises', entry.exerciseId) || { name: entry.exerciseId };
   const last = store.lastTime(log.athleteId, entry.exerciseId, log.date);
   const units = store.settings().units;
-  const loaded = ex.loaded !== false;
-  const lastTxt = last ? `Last time: ${last.sets.map((s) => s.weight ? `${s.weight}×${s.reps}` : `${s.reps}`).join(', ')}` : '';
+  const measure = entry.measure || 'reps';
+  const loaded = ex.loaded !== false && measure !== 'none';
+  const amount = (s) => (measure === 'time' ? fmtSecs(s.secs) : `${s.reps ?? ''}`);
+  const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${s.weight}×${amount(s)}` : amount(s)).join(', ')}` : '';
+  // The box the athlete fills in: reps, seconds, or nothing for a check-off item.
+  const k = measure === 'time' ? 'secs' : 'reps';
+  const box = (s, j) => (measure === 'none' ? '' : `<label class="field"><input type="number" inputmode="numeric" min="0" value="${s[k] ?? ''}" placeholder="${s[measure === 'time' ? 'targetSecs' : 'targetReps'] || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="${k}" aria-label="${measure === 'time' ? 'Seconds' : 'Reps'}, set ${j + 1}"><span>${k}</span></label>`);
+  const cols = `${loaded ? '' : 'no-load'} ${measure === 'none' ? 'check-only' : ''}`;
   const tags = [];
   if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
   if (entry.swappedFrom) tags.push(`Swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
   const rows = entry.sets.map((s, j) => `
-    <div class="set ${s.done ? 'done' : ''} ${loaded ? '' : 'no-load'}">
+    <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
-      <span class="target">${esc(targetText(s))}</span>
+      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure))}</span>
       ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${s.weight ?? ''}" placeholder="${s.targetWeight ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
-      <label class="field"><input type="number" inputmode="numeric" min="0" value="${s.reps ?? ''}" placeholder="${s.targetReps || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="reps" aria-label="Reps, set ${j + 1}"><span>reps</span></label>
+      ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
   return `<article class="entry ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
@@ -120,10 +136,10 @@ function entryCard(log, entry, i, label) {
     </header>
     ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
     ${ex.video ? `<a class="link small" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Watch demo</a>` : ''}
-    <div class="set-head ${loaded ? '' : 'no-load'}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>Reps</span><span></span></div>
+    ${measure === 'none' ? '' : `<div class="set-head ${cols}"><span>Set</span><span>Target</span>${loaded ? `<span>${units}</span>` : ''}<span>${measure === 'time' ? 'Secs' : 'Reps'}</span><span></span></div>`}
     <div class="sets">${rows}</div>
     <div class="entry-foot">
-      <button class="link" data-action="addSet" data-i="${i}">+ Set</button>
+      ${measure === 'none' ? '' : `<button class="link" data-action="addSet" data-i="${i}">+ Set</button>`}
       ${entry.sets.length > 1 ? `<button class="link muted-link" data-action="removeSet" data-i="${i}">− Set</button>` : ''}
       <span class="spacer"></span>
       <button class="link" data-action="toggleNote" data-i="${i}">${entry.athleteNote ? 'Edit note' : '+ Note'}</button>
@@ -181,10 +197,10 @@ export function session(root, { id, date }) {
       // Ticking a set with empty boxes logs it exactly as prescribed.
       if (s.done) {
         if (s.reps == null) s.reps = s.targetReps ?? null;
+        if (s.secs == null) s.secs = s.targetSecs ?? null;
         if (s.weight == null) s.weight = s.targetWeight ?? null;
         const row = el.closest('.set');
-        const w = row.querySelector('[data-k=weight]'); if (w && s.weight != null) w.value = s.weight;
-        const r = row.querySelector('[data-k=reps]'); if (r && s.reps != null) r.value = s.reps;
+        for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = s[f]; }
       }
       el.setAttribute('aria-pressed', s.done);
       el.closest('.set').classList.toggle('done', s.done);
@@ -199,7 +215,7 @@ export function session(root, { id, date }) {
     addSet: (el) => {
       const sets = log.entries[el.dataset.i].sets;
       const last = sets[sets.length - 1] || {};
-      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, reps: null, weight: null, done: false });
+      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, reps: null, secs: null, weight: null, done: false });
       persist(); rerender();
     },
     removeSet: (el) => { log.entries[el.dataset.i].sets.pop(); persist(); rerender(); },

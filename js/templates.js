@@ -5,11 +5,12 @@
 const X = (id, name, pattern, body, loaded = true) => ({ id, name, pattern, body, loaded, alts: [] });
 
 // RIR (reps in reserve) maps onto the app's RPE field: RIR 0 = RPE 10.
-const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo } = {}) => {
+const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo, measure } = {}) => {
   const lines = [note, [range && `Reps ${range}`, rir != null && `RIR ${rir}`, rest && `Rest ${rest}`].filter(Boolean).join(' · ')].filter(Boolean);
   const item = { exerciseId, sets, reps };
   if (rir != null) item.rpe = 10 - (rir === '1/0' ? 0.5 : Number(rir));
   if (tempo) item.tempo = tempo;
+  if (measure) item.measure = measure;
   if (lines.length) item.note = lines.join('\n');
   return item;
 };
@@ -55,7 +56,7 @@ const FALL_2026_EXERCISES = [
   X('sa-rear-delt-fly', 'SA rear delt fly', 'pull', 'upper'),
 ];
 
-const warm = () => it('warmup', 1, null, { note: WARMUP_NOTE });
+const warm = () => it('warmup', 1, null, { note: WARMUP_NOTE, measure: 'none' });
 
 const FALL_2026_BLOCK = {
   name: 'Fall 2026',
