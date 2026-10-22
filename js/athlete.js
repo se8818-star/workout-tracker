@@ -38,7 +38,8 @@ export function fmtSecs(n) {
 }
 
 function targetText(set, measure, u) {
-  const w = store.showW(set.targetWeight ?? set.weight, u);
+  // A % of max shows as the % until the athlete has a max on file.
+  const w = store.showW(set.targetWeight ?? set.weight, u) || (set.targetPct != null ? `${set.targetPct}%` : null);
   if (measure === 'time') {
     const t = fmtSecs(set.targetSecs ?? set.secs);
     return w && t ? `${w} × ${t}` : t;
@@ -84,9 +85,9 @@ export function today_(root, { id }, query) {
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const iso = query.get('d') || today();
   const plans = store.plannedOn(id, iso);
-  const log = store.logFor(id, iso);
+  const log = store.refreshLog(store.logFor(id, iso));
   // The assigned warmup gets its own card, above the workout.
-  const wlog = store.warmupLogFor(id, iso), w = store.warmupOn(id, iso);
+  const wlog = store.refreshLog(store.warmupLogFor(id, iso)), w = store.warmupOn(id, iso);
   const warm = wlog ? workoutCard(id, iso, 'Warmup', wlog.name, wlog.entries.length, wlog, true)
     : w ? workoutCard(id, iso, 'Warmup', w.block.name, w.block.days[0].items.length, null, true) : '';
 
@@ -185,7 +186,7 @@ export function session(root, { id, date, warm = false }) {
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const plans = warm ? [] : store.plannedOn(id, date);
-  let log = warm ? store.warmupLogFor(id, date) : store.logFor(id, date);
+  let log = store.refreshLog(warm ? store.warmupLogFor(id, date) : store.logFor(id, date));
   if (!log) {
     const w = warm && store.warmupOn(id, date);
     if (!w && !plans.length) { location.hash = `#/athlete/${id}?d=${date}`; return; }
@@ -252,12 +253,13 @@ export function session(root, { id, date, warm = false }) {
       persist(); rerender();
     },
     addSet: (el) => {
-      const sets = log.entries[el.dataset.i].sets;
+      const e = log.entries[el.dataset.i], sets = e.sets;
       const last = sets[sets.length - 1] || {};
-      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, ...(last.unit ? { unit: last.unit } : {}), reps: null, secs: null, weight: null, done: false });
+      e.setsChanged = true;
+      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, ...(last.targetPct != null ? { targetPct: last.targetPct } : {}), ...(last.unit ? { unit: last.unit } : {}), reps: null, secs: null, weight: null, done: false });
       persist(); rerender();
     },
-    removeSet: (el) => { log.entries[el.dataset.i].sets.pop(); persist(); rerender(); },
+    removeSet: (el) => { const e = log.entries[el.dataset.i]; e.sets.pop(); e.setsChanged = true; persist(); rerender(); },
     toggleNote: (el) => { const n = root.querySelector(`#note-${el.dataset.i}`); n.hidden = false; n.querySelector('textarea').focus(); },
     entryNote: (el) => { log.entries[el.dataset.i].athleteNote = el.value; persist(); },
     sessionRpe: (el) => {
