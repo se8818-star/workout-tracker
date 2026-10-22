@@ -238,7 +238,7 @@ function itemRow(item, di, ii, ex, label) {
       <span class="times" aria-hidden="true">×</span>
       ${measure === 'time' ? stepper('Seconds', 'secs', item.secs, 0, 5) : stepper(measure === 'breaths' ? 'Breaths' : 'Reps', 'reps', item.reps, 0)}
     </div>`}
-    ${x?.loaded && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
+    ${x && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
       <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
       <div class="unit-field"><span>Unit</span><div class="seg unit-seg" role="group" aria-label="Weight unit">${['lb', 'kg'].map((v) =>
         `<button class="${iu === v ? 'on' : ''}" data-action="itemUnit" data-v="${v}" aria-pressed="${iu === v}">${v}</button>`).join('')}</div></div>
@@ -255,7 +255,7 @@ function itemRow(item, di, ii, ex, label) {
         <label>RPE<input type="number" step="0.5" min="1" max="10" value="${item.rpe ?? ''}" data-action="itemField" data-k="rpe"></label>
         <label>Each week<select data-action="progType">
           <option value="none" ${prog.type === 'none' ? 'selected' : ''}>Same</option>
-          ${x?.loaded ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
+          ${x?.loaded || loadType !== 'none' ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
           <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
           ${isCount(measure) ? `<option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ ${measure === 'breaths' ? 'breaths' : 'reps'}</option>` : ''}
           ${measure === 'time' ? `<option value="add_secs" ${prog.type === 'add_secs' ? 'selected' : ''}>+ seconds</option>` : ''}</select></label>
@@ -425,6 +425,9 @@ export function blockEditor(root, { id }, query) {
       if (el.value === 'weight' && pt === 'add_pct') it.progression = { type: 'add_weight', step: kg ? store.readW(2.5, 'kg') : 5 };
       if (el.value === 'pct' && pt === 'add_weight') it.progression = { type: 'add_pct', step: 2.5 };
       if (el.value === 'none' && (pt === 'add_pct' || pt === 'add_weight')) it.progression = undefined;
+      // Giving an exercise a load means it uses a weight: athletes get a weight box and it counts toward tonnage.
+      const ex = store.get('exercises', it.exerciseId);
+      if (el.value !== 'none' && ex && !ex.loaded) store.put('exercises', { ...ex, loaded: true });
       save();
     },
     progType: (el) => {
