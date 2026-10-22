@@ -1,6 +1,6 @@
 // Optional cloud sync with Supabase. With no keys in config.js this does nothing
 // and the app runs in demo mode. With keys, people sign in with an emailed
-// 6-digit code, coaches create a team, athletes join with the team code, and
+// sign-in code, coaches create a team, athletes join with the team code, and
 // local records are mirrored to the `records` table (see supabase/schema.sql).
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
@@ -134,12 +134,12 @@ const readPending = () => { try { return JSON.parse(localStorage.getItem(PENDING
 const writePending = (v) => { try { if (v) localStorage.setItem(PENDING, JSON.stringify(v)); else localStorage.removeItem(PENDING); } catch { /* private mode */ } };
 
 // The first page: sign in to an existing account, or create one and join a
-// team with the coach's code. Both use the emailed 6-digit code.
+// team with the coach's code. Both use the emailed sign-in code.
 function loginView(root, mode = 'signin', sentTo = '') {
   const create = mode === 'create';
   const pending = readPending();
   const codeStep = sentTo ? `
-      <p class="muted">We emailed ${create ? 'a 6-digit code' : 'a sign-in link and a 6-digit code'} to <b>${esc(sentTo)}</b>.${create ? '' : ' Tap the link, or type the code here.'}</p>
+      <p class="muted">We emailed ${create ? 'a sign-in code' : 'a sign-in link and code'} to <b>${esc(sentTo)}</b>.${create ? '' : ' Tap the link, or type the code here.'}</p>
       <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
       <button class="btn wide" data-action="verify">${create ? 'Create account' : 'Sign in'}</button>
       <button class="link" data-action="restart">Use a different email</button>` : '';
@@ -157,7 +157,7 @@ function loginView(root, mode = 'signin', sentTo = '') {
         <label class="field-row"><span>Team code</span><input id="lg-team" maxlength="6" autocapitalize="characters" value="${esc(pending?.code || '')}"></label>
         <label class="field-row"><span>Group</span><input id="lg-group" placeholder="e.g. Pitchers (optional)" value="${esc(pending?.group || '')}"></label>
         ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}`
-      : `<p class="muted">Welcome back. We'll email you a sign-in link and a 6-digit code. Tap the link, or type the code here.</p>
+      : `<p class="muted">Welcome back. We'll email you a sign-in link and code. Tap the link, or type the code here.</p>
         <label class="field-row"><span>Email</span><input type="email" id="lg-email" autocomplete="email" inputmode="email" value="${esc(sentTo)}"></label>`}
       ${sentTo ? codeStep : `<button class="btn wide" data-action="send">Send code</button>`}
     </section>`;

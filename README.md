@@ -48,7 +48,7 @@ Run the tests for the training math with `node --test`.
    `insert into coach_emails (email) values ('you@example.com');`
    Only emails on that list can create a team; everyone else can only join as an athlete.
 2. **Sign-in codes.** In Supabase, Authentication → Emails → "Magic Link" template: add
-   `{{ .Token }}` to the email body so people get a 6-digit code (codes work better than links
+   `{{ .Token }}` to the email body so people get a sign-in code (codes work better than links
    inside a home-screen app).
 3. **Keys.** Copy the Project URL and anon public key from Project Settings → API into
    [`js/config.js`](js/config.js).
