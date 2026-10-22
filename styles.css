@@ -165,7 +165,7 @@ textarea { resize: vertical; }
 .entry-title { flex: 1; min-width: 0; }
 .entry h3 { margin: 2px 0 4px; font-size: 1.4rem; font-stretch: 65%; }
 .tags, .last { color: var(--muted); font-family: var(--mono); font-size: 0.66rem; }
-.coach-note { border-left: 4px solid var(--track); background: #f7e3dc; padding: 6px 10px; font-size: 0.95rem; margin: 12px 0 4px; }
+.coach-note { white-space: pre-line; border-left: 4px solid var(--track); background: #f7e3dc; padding: 6px 10px; font-size: 0.95rem; margin: 12px 0 4px; }
 .set-head, .set { display: grid; grid-template-columns: 26px 1fr 1fr 0.8fr 48px; gap: 8px; align-items: center; }
 .set-head.no-load, .set.no-load { grid-template-columns: 26px 1fr 1fr 48px; }
 .set-head { margin-top: 14px; font-family: var(--mono); font-size: 0.58rem; font-weight: 600; text-transform: uppercase; color: var(--muted); }
@@ -235,6 +235,9 @@ textarea { resize: vertical; }
   background: transparent; border-color: transparent;
 }
 .day-name:focus { background: #fff; border-color: var(--ink); }
+.card.row.between > a { text-decoration: none; }
+.templates { margin-top: 32px; }
+.templates .card small { display: block; max-width: 48ch; margin-top: 2px; }
 .day-card { border-top-width: 10px; border-top-color: var(--track); }
 .card.row.wrap { column-gap: 16px; }
 .card.row.wrap .field-row > span { flex-basis: auto; }

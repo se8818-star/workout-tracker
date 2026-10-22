@@ -107,7 +107,7 @@ function entryCard(log, entry, i, label) {
       <span class="set-n">${j + 1}</span>
       <span class="target">${esc(targetText(s))}</span>
       ${loaded ? `<label class="field"><input type="number" inputmode="decimal" min="0" step="any" value="${s.weight ?? ''}" placeholder="${s.targetWeight ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight, set ${j + 1}"><span>${units}</span></label>` : ''}
-      <label class="field"><input type="number" inputmode="numeric" min="0" value="${s.reps ?? ''}" placeholder="${s.targetReps ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="reps" aria-label="Reps, set ${j + 1}"><span>reps</span></label>
+      <label class="field"><input type="number" inputmode="numeric" min="0" value="${s.reps ?? ''}" placeholder="${s.targetReps || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="reps" aria-label="Reps, set ${j + 1}"><span>reps</span></label>
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>`).join('');
   return `<article class="entry ${entry.sets.every((s) => s.done) ? 'complete' : ''}" id="entry-${i}">
