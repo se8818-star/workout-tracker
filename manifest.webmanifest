@@ -1,6 +1,6 @@
 {
   "name": "Chunky Training",
-  "short_name": "Training",
+  "short_name": "Chunky",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
