@@ -103,7 +103,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
       const n = measure === 'none' ? 1 : prescribedSets(item, block, week);
       return {
         exerciseId: item.exerciseId,
-        ...(item.warmup ? { warmup: true } : {}),
+        ...(item.warmup || block.kind === 'warmup' ? { warmup: true } : {}),
         measure,
         ...(item.unit ? { unit: item.unit } : {}),
         note: item.note || '',
@@ -223,6 +223,15 @@ export function scheduledOn(assignment, block, iso) {
   const dayIndex = weekdays.indexOf(dow);
   if (dayIndex < 0 || dayIndex >= block.days.length) return null;
   return { week, dayIndex };
+}
+
+// An assigned warmup runs on its weekdays from the start date until the
+// optional end date, whatever program week it is.
+export function warmupScheduledOn(assignment, iso) {
+  const offset = daysBetween(assignment.startDate, iso);
+  if (offset < 0 || (assignment.endDate && iso > assignment.endDate)) return false;
+  const dow = (parseISO(iso).getDay() + 6) % 7;
+  return (assignment.weekdays || []).includes(dow);
 }
 
 export function defaultWeekdays(n) {
