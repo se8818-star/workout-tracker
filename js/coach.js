@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet } from './athlete.js';
@@ -166,17 +166,21 @@ function findExercise(name) {
 }
 
 // A number with − / + buttons either side, for sets and reps.
-function stepper(label, k, value, min) {
+// A number with − / + buttons either side, for sets, reps and seconds.
+function stepper(label, k, value, min, step = 1) {
   return `<div class="stepper"><span>${label}</span>
-    <div class="stepper-row"><button class="step-btn" data-action="step" data-k="${k}" data-d="-1" aria-label="Fewer ${label.toLowerCase()}">−</button>
-    <input type="number" inputmode="numeric" min="${min}" value="${value ?? ''}" data-action="itemField" data-k="${k}" aria-label="${label}">
-    <button class="step-btn" data-action="step" data-k="${k}" data-d="1" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
+    <div class="stepper-row"><button class="step-btn" data-action="step" data-k="${k}" data-d="${-step}" aria-label="Less ${label.toLowerCase()}">−</button>
+    <input type="number" inputmode="numeric" min="${min}" step="${step}" value="${value ?? ''}" data-action="itemField" data-k="${k}" aria-label="${label}">
+    <button class="step-btn" data-action="step" data-k="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
 }
+
+const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['none', 'No sets']];
 
 function itemRow(item, di, ii, ex) {
   const x = ex[item.exerciseId];
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
   const prog = item.progression || { type: 'none' };
+  const measure = measureOf(item);
   const loadedEx = store.all('exercises').filter((e) => e.loaded).sort((a, b) => a.name.localeCompare(b.name));
   // Less-used settings stay folded away unless one is already in use.
   const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
@@ -190,12 +194,14 @@ function itemRow(item, di, ii, ex) {
       <button class="icon-btn" data-action="itemDown" title="Move down" aria-label="Move down">↓</button>
       <button class="icon-btn" data-action="itemDel" title="Remove" aria-label="Remove">✕</button>
     </div>
-    <div class="item-main">
+    <div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
+      `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
+    ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', item.sets, 1)}
       <span class="times" aria-hidden="true">×</span>
-      ${stepper('Reps', 'reps', item.reps, 0)}
-    </div>
-    ${x?.loaded ? `<div class="item-fields">
+      ${measure === 'time' ? stepper('Seconds', 'secs', item.secs, 0, 5) : stepper('Reps', 'reps', item.reps, 0)}
+    </div>`}
+    ${x?.loaded && measure !== 'none' ? `<div class="item-fields">
       <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
       ${loadType === 'pct' ? `<label>%<input type="number" step="0.5" value="${item.pct}" data-action="itemField" data-k="pct"></label>
         <label>Max from<select data-action="itemField" data-k="maxFrom"><option value="">${esc(x.name)}</option>${loadedEx.filter((e) => e.id !== item.exerciseId).map((e) => `<option value="${e.id}" ${item.maxFrom === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : ''}
@@ -212,7 +218,8 @@ function itemRow(item, di, ii, ex) {
           <option value="none" ${prog.type === 'none' ? 'selected' : ''}>Same</option>
           ${x?.loaded ? `<option value="add_pct" ${prog.type === 'add_pct' ? 'selected' : ''}>+ % of max</option>
           <option value="add_weight" ${prog.type === 'add_weight' ? 'selected' : ''}>+ weight</option>` : ''}
-          <option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ reps</option></select></label>
+          ${measure === 'reps' ? `<option value="add_reps" ${prog.type === 'add_reps' ? 'selected' : ''}>+ reps</option>` : ''}
+          ${measure === 'time' ? `<option value="add_secs" ${prog.type === 'add_secs' ? 'selected' : ''}>+ seconds</option>` : ''}</select></label>
         ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${prog.step ?? ''}" data-action="progStep"></label>` : ''}
         <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
       </div>
@@ -240,17 +247,13 @@ export function blockEditor(root, { id }, query) {
   const weekLine = (t) => `Week ${week + 1} plan: <b>${fmt(t.sets)}</b> sets, <b>${fmt(t.contacts)}</b> plyo contacts (${fmt(t.highContacts)} high), ${fmt(t.sprintMeters)} m sprinting.`;
   const dayLine = (t) => `${fmt(t.sets)} sets · ${fmt(t.contacts)} contacts${t.sprintMeters ? ` · ${t.sprintMeters} m` : ''}`;
   const { wk: weekTot, days: dayTots } = totals();
-
-  root.innerHTML = `
-    <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
-      <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Block name"></header>
-    <section class="card row gap wrap">
-      <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
-      <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
-      <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
-    </section>
-    <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
-    ${b.days.map((d, di) => `
+  // One day is open at a time, picked from the tabs; a second can sit beside it.
+  const day = Math.min(Number(query.get('day') || 0), Math.max(0, b.days.length - 1));
+  let other = query.get('with') === null || query.get('with') === '' ? null : Number(query.get('with'));
+  if (other === day || other >= b.days.length) other = null;
+  const dayCard = (di) => {
+    const d = b.days[di];
+    return `
       <section class="card day-card" data-di="${di}">
         <div class="row between gap">
           <input class="day-name" value="${esc(d.name)}" data-action="dayName" data-di="${di}" aria-label="Day name">
@@ -268,8 +271,25 @@ export function blockEditor(root, { id }, query) {
             <button class="chip" data-action="quickAdd" data-di="${di}">Add</button>
           </div>
         </details>
-      </section>`).join('')}
-    <button class="btn ghost wide" data-action="addDay">+ Add day</button>
+      </section>`;
+  };
+
+  root.innerHTML = `
+    <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
+      <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Block name"></header>
+    <section class="card row gap wrap">
+      <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
+      <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
+      <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
+    </section>
+    <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
+    <nav class="day-tabs" aria-label="Days">
+      ${b.days.map((d, di) => `<button class="day-tab ${di === day ? 'on' : ''} ${di === other ? 'side' : ''}" data-action="pickDay" data-di="${di}" aria-pressed="${di === day}">${esc(d.name || `Day ${di + 1}`)}</button>`).join('')}
+      <button class="day-tab add" data-action="addDay">+ Day</button>
+    </nav>
+    ${b.days.length > 1 ? `<label class="side-pick">Side by side with
+      <select data-action="pickOther"><option value="">Nothing</option>${b.days.map((d, di) => (di === day ? '' : `<option value="${di}" ${di === other ? 'selected' : ''}>${esc(d.name || `Day ${di + 1}`)}</option>`)).join('')}</select></label>` : ''}
+    <div class="day-cols ${other != null ? 'two' : ''}">${b.days.length ? [day, other].filter((di) => di != null).map(dayCard).join('') : '<p class="empty">No days yet. Tap "+ Day".</p>'}</div>
     <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this block</a>`;
 
   // Typing in a field only saves and refreshes the totals; a full redraw would
@@ -286,6 +306,13 @@ export function blockEditor(root, { id }, query) {
     blockEditor(root, { id }, query);
     window.scrollTo(0, scrollY);
   };
+  // Change which days are shown without a page jump.
+  const view = (changes) => {
+    const q = new URLSearchParams(query);
+    for (const [k, v] of Object.entries(changes)) { if (v == null) q.delete(k); else q.set(k, v); }
+    history.replaceState(null, '', `#/coach/block/${id}?${q}`);
+    blockEditor(root, { id }, q);
+  };
   const itemOf = (el) => { const r = el.closest('.item'); return { di: Number(r.dataset.di), ii: Number(r.dataset.ii) }; };
   const num = (v) => (v === '' ? null : Number(v));
 
@@ -293,11 +320,25 @@ export function blockEditor(root, { id }, query) {
     blockName: (el) => { b.name = el.value; save(false); },
     weeks: (el) => { b.weeks = Math.max(1, Number(el.value) || 1); if (b.deloadWeek >= b.weeks) b.deloadWeek = null; save(); },
     deload: (el) => { b.deloadWeek = el.value === '' ? null : Number(el.value); save(); },
-    previewWeek: (el) => { location.hash = `#/coach/block/${id}?w=${el.value}`; },
-    dayName: (el) => { b.days[el.dataset.di].name = el.value; save(false); },
-    dayCopy: (el) => { const d = structuredClone(b.days[el.dataset.di]); d.name += ' (copy)'; b.days.splice(Number(el.dataset.di) + 1, 0, d); save(); },
-    dayDel: (el) => { if (confirm('Delete this day?')) { b.days.splice(el.dataset.di, 1); save(); } },
-    addDay: () => { b.days.push({ name: `Day ${b.days.length + 1}`, items: [] }); save(); },
+    previewWeek: (el) => view({ w: el.value }),
+    pickDay: (el) => { const di = Number(el.dataset.di); view({ day: di, with: di === other ? day : other }); },
+    pickOther: (el) => view({ with: el.value || null }),
+    dayName: (el) => {
+      b.days[el.dataset.di].name = el.value;
+      const tab = root.querySelector(`.day-tab[data-di="${el.dataset.di}"]`); if (tab) tab.textContent = el.value || `Day ${Number(el.dataset.di) + 1}`;
+      save(false);
+    },
+    dayCopy: (el) => {
+      const di = Number(el.dataset.di);
+      const d = structuredClone(b.days[di]); d.name += ' (copy)'; b.days.splice(di + 1, 0, d);
+      store.put('blocks', b); view({ day: di + 1, with: null });
+    },
+    dayDel: (el) => {
+      if (!confirm('Delete this day?')) return;
+      b.days.splice(el.dataset.di, 1);
+      store.put('blocks', b); view({ day: Math.max(0, Math.min(day, b.days.length - 1)), with: null });
+    },
+    addDay: () => { b.days.push({ name: `Day ${b.days.length + 1}`, items: [] }); store.put('blocks', b); view({ day: b.days.length - 1 }); },
     itemField: (el) => {
       const { di, ii } = itemOf(el);
       const k = el.dataset.k;
@@ -322,7 +363,7 @@ export function blockEditor(root, { id }, query) {
     progType: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
-      const defaults = { add_pct: 2.5, add_weight: 5, add_reps: 1 };
+      const defaults = { add_pct: 2.5, add_weight: 5, add_reps: 1, add_secs: 5 };
       it.progression = el.value === 'none' ? undefined : { type: el.value, step: defaults[el.value] };
       save();
     },
@@ -335,6 +376,18 @@ export function blockEditor(root, { id }, query) {
       // Update the box in place; a full redraw would lose the next quick tap.
       el.parentElement.querySelector('input').value = it[k];
       save(false);
+    },
+    measure: (el) => {
+      const { di, ii } = itemOf(el);
+      const it = b.days[di].items[ii];
+      const v = el.dataset.v;
+      if (v === 'reps') delete it.measure; else it.measure = v;
+      if (v === 'time' && it.secs == null) it.secs = 30;
+      if (v !== 'reps' && it.reps == null) delete it.reps;
+      // A weekly rule only makes sense for the measure it was written for.
+      const pt = it.progression?.type;
+      if ((pt === 'add_reps' && v !== 'reps') || (pt === 'add_secs' && v !== 'time') || v === 'none') it.progression = undefined;
+      save();
     },
     itemPick: (el) => {
       const { di, ii } = itemOf(el);

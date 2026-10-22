@@ -58,6 +58,16 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
   return roundTo(weight, rounding);
 }
 
+// How an item is measured: 'reps' (default), 'time' (seconds per set), or
+// 'none' (no sets or reps; the athlete just checks it off, e.g. a warmup).
+export const measureOf = (item) => item.measure || 'reps';
+
+export function prescribedSecs(item, week) {
+  const prog = item.progression || {};
+  const secs = item.secs || 0;
+  return prog.type === 'add_secs' ? secs + (prog.step || 0) * week : secs;
+}
+
 export function prescribedReps(item, week) {
   const prog = item.progression || {};
   const reps = item.reps || 0;
@@ -71,15 +81,18 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
   return {
     name: day.name,
     items: day.items.map((item) => {
-      const reps = prescribedReps(item, week);
-      const weight = prescribedWeight(item, athlete, week, block, rounding);
-      const n = prescribedSets(item, block, week);
+      const measure = measureOf(item);
+      const reps = measure === 'reps' ? prescribedReps(item, week) : null;
+      const secs = measure === 'time' ? prescribedSecs(item, week) : null;
+      const weight = measure === 'none' ? null : prescribedWeight(item, athlete, week, block, rounding);
+      const n = measure === 'none' ? 1 : prescribedSets(item, block, week);
       return {
         exerciseId: item.exerciseId,
+        measure,
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',
-        sets: Array.from({ length: n }, () => ({ reps, weight, rpe: item.rpe ?? null, done: false })),
+        sets: Array.from({ length: n }, () => ({ reps, secs, weight, rpe: item.rpe ?? null, done: false })),
       };
     }),
   };
