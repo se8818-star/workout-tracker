@@ -140,7 +140,7 @@ function loginView(root, mode = 'signin', sentTo = '') {
   const pending = readPending();
   const codeStep = sentTo ? `
       <p class="muted">We emailed ${create ? 'a 6-digit code' : 'a sign-in link and a 6-digit code'} to <b>${esc(sentTo)}</b>.${create ? '' : ' Tap the link, or type the code here.'}</p>
-      <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
+      <label class="field-row"><span>Code</span><input id="lg-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
       <button class="btn wide" data-action="verify">${create ? 'Create account' : 'Sign in'}</button>
       <button class="link" data-action="restart">Use a different email</button>` : '';
   root.innerHTML = `
@@ -186,7 +186,8 @@ function loginView(root, mode = 'signin', sentTo = '') {
       loginView(root, mode, email);
     },
     verify: async () => {
-      const token = $('#lg-otp', root).value.trim();
+      // Keep digits only: pasted codes often carry spaces. Supabase can be set to 6-10 digits.
+      const token = $('#lg-otp', root).value.replace(/\D/g, '');
       const { data, error } = await sb.auth.verifyOtp({ email: sentTo, token, type: 'email' });
       if (error) return toast(error.message);
       user = data.user;
