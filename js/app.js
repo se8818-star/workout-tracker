@@ -13,6 +13,7 @@ const routes = [
   [/^\/athlete\/([^/]+)$/, athleteViews.today_, ['id']],
   [/^\/athlete\/([^/]+)\/week$/, athleteViews.week, ['id']],
   [/^\/athlete\/([^/]+)\/session\/(\d{4}-\d{2}-\d{2})$/, athleteViews.session, ['id', 'date']],
+  [/^\/athlete\/([^/]+)\/warmup\/(\d{4}-\d{2}-\d{2})$/, athleteViews.warmupSession, ['id', 'date']],
   [/^\/athlete\/([^/]+)\/history$/, athleteViews.history, ['id']],
   [/^\/coach$/, coachViews.board],
   [/^\/coach\/athlete\/([^/]+)$/, coachViews.athlete, ['id']],

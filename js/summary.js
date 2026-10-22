@@ -14,7 +14,6 @@ export function weekSummary(athleteId, monday) {
     const iso = addDays(monday, i);
     const plans = store.plannedOn(athleteId, iso);
     for (const p of plans) {
-      if (p.warmupOnly) continue;
       const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.roundStep());
       s.items = s.items.map((it) => tagPctOfMax(it, athlete, ex));
       planned = addTotals(planned, sessionTotals(s, ex, false));
@@ -39,7 +38,7 @@ export function loadTrend(athleteId, todayIso) {
   // The ratio means little until there are about three weeks of history.
   const enough = logs.length && Math.round((new Date(todayIso) - new Date(logs[0].date)) / 86400000) >= 21;
   for (const l of logs) {
-    if (!l.finished || l.date > todayIso) continue;
+    if (!l.finished || l.warmup || l.date > todayIso) continue;
     const age = Math.round((new Date(todayIso) - new Date(l.date)) / 86400000);
     if (age < 7) acute += sessionLoad(l);
     if (age < 28) chronic += sessionLoad(l);

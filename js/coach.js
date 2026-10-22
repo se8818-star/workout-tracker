@@ -131,7 +131,7 @@ export function athlete(root, { id }) {
 
 // Saved warmups live with the blocks (kind 'warmup', one day) so they sync the
 // same way. A coach loads one into program days, or assigns it to athletes like
-// a block, and it then runs in front of their program on its weekdays.
+// a block; it then shows as its own card on the athlete's day, logged on its own.
 const isWarmup = (b) => b.kind === 'warmup';
 
 export function blocks(root) {
@@ -147,7 +147,7 @@ export function blocks(root) {
     ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('')}
     <button class="btn" data-action="new">+ New block</button>
     <h2 class="sec-head">Warmups</h2>
-    <p class="muted">Assign a warmup to athletes and it shows up in front of their workout. You can also load one into a program day from that day's Warmup section.</p>
+    <p class="muted">Assign a warmup to athletes and it shows up as its own card above their workout. You can also load one into a program day from that day's Warmup section.</p>
     ${all.filter(isWarmup).map((b) => row(b, `${b.days[0]?.items.length || 0} exercises`)).join('')}
     <button class="btn ghost" data-action="newWarmup">+ New warmup</button>
     <section class="templates">
@@ -331,7 +331,7 @@ export function blockEditor(root, { id }, query) {
   root.innerHTML = isWarmup(b) ? `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Warmup name"></header>
-    <p class="muted small">A saved warmup. <a href="#/coach/assign?block=${b.id}">Assign it</a> to athletes, or load it into a program day from that day's Warmup section. Changes here reach assigned athletes on their next workout, but not programs that already loaded a copy.</p>
+    <p class="muted small">A saved warmup. <a href="#/coach/assign?block=${b.id}">Assign it</a> to athletes, or load it into a program day from that day's Warmup section. Changes here reach assigned athletes on days they haven't started yet, but not programs that already loaded a copy.</p>
     <section class="card day-card" data-di="0"><div class="sec warm-sec">
       ${warmItems(b.days[0], 0)}
       <button class="chip" data-action="itemAdd" data-di="0" data-warm="1">+ Warmup exercise</button>
@@ -573,7 +573,7 @@ export function assign(root, _p, query) {
       <label class="field-row"><span>Block</span><select id="as-block" data-action="pickBlock">
         ${programs.length ? `<optgroup label="Programs">${programs.map(opt).join('')}</optgroup>` : ''}
         ${warmups.length ? `<optgroup label="Warmups">${warmups.map(opt).join('')}</optgroup>` : ''}</select></label>
-      ${warm ? '<p class="muted small">The warmup shows up in front of the athlete\'s workout on the days you pick. On a day with no program it\'s the whole session.</p>' : ''}
+      ${warm ? '<p class="muted small">The warmup shows up as its own card above the athlete\'s workout on the days you pick.</p>' : ''}
       <label class="field-row"><span>Start date</span><input type="date" id="as-start" value="${startMon}"></label>
       ${warm ? '<label class="field-row"><span>End date (optional)</span><input type="date" id="as-end"></label>' : ''}
       <fieldset><legend>${warm ? 'Days to do it' : `Training days (${block.days.length} per week, in order)`}</legend>

@@ -97,34 +97,32 @@ export function assignmentsFor(athleteId) {
   return all('assignments').filter((a) => a.athleteId === athleteId);
 }
 
-// What is planned for an athlete on a date: [{assignment, block, week, dayIndex, warmup?}]
-// An assigned warmup rides in front of that day's program (plan.warmup); on a
-// day with no program it is the day's session by itself (plan.warmupOnly).
+// What is planned for an athlete on a date: [{assignment, block, week, dayIndex}]
+// Programs only; an assigned warmup is its own session (warmupOn).
 export function plannedOn(athleteId, iso) {
-  const out = [], warm = [];
+  const out = [];
   for (const a of assignmentsFor(athleteId)) {
     const block = get('blocks', a.blockId);
-    if (!block) continue;
-    if (block.kind === 'warmup') {
-      if (warmupScheduledOn(a, iso)) warm.push({ assignment: a, block, week: 0, dayIndex: 0, warmupOnly: true });
-      continue;
-    }
+    if (!block || block.kind === 'warmup') continue;
     const at = scheduledOn(a, block, iso);
     if (at) out.push({ assignment: a, block, ...at });
   }
-  if (!out.length) return warm.slice(0, 1);
-  if (warm.length) for (const p of out) p.warmup = warm[0].block;
   return out;
 }
 
-// The warmup block assigned for a date, if any.
+// The warmup assigned for a date: {assignment, block} or null.
 export function warmupOn(athleteId, iso) {
-  const p = plannedOn(athleteId, iso)[0];
-  return p?.warmupOnly ? p.block : p?.warmup || null;
+  for (const a of assignmentsFor(athleteId)) {
+    const block = get('blocks', a.blockId);
+    if (block?.kind === 'warmup' && warmupScheduledOn(a, iso)) return { assignment: a, block };
+  }
+  return null;
 }
 
 export function logId(athleteId, iso) { return `${athleteId}:${iso}`; }
 export function logFor(athleteId, iso) { return get('logs', logId(athleteId, iso)); }
+// The warmup is logged on its own, next to the day's workout.
+export function warmupLogFor(athleteId, iso) { return get('logs', `${logId(athleteId, iso)}:warmup`); }
 
 export function logsFor(athleteId) {
   return all('logs').filter((l) => l.athleteId === athleteId).sort((a, b) => a.date.localeCompare(b.date));
@@ -149,14 +147,23 @@ export function startLog(athleteId, iso, plan) {
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
   const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep());
-  // An assigned warmup takes the place of any warmup written into the program day.
-  if (plan.warmup) s.items = [...buildSession(plan.warmup, 0, 0, athlete, roundStep()).items, ...s.items.filter((it) => !it.warmup)];
   return put('logs', {
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
-    ...(plan.warmup ? { warmupId: plan.warmup.id } : {}),
     name: s.name,
     // Prescribed numbers become targets; the boxes start empty for the athlete to fill.
+    entries: s.items.map((it) => ({ ...it, unit: it.unit || unit(), sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
+    sessionRpe: null, minutes: null, note: '', finished: false,
+  });
+}
+
+export function startWarmupLog(athleteId, iso, w) {
+  const existing = warmupLogFor(athleteId, iso);
+  if (existing) return existing;
+  const s = buildSession(w.block, 0, 0, get('athletes', athleteId), roundStep());
+  return put('logs', {
+    id: `${logId(athleteId, iso)}:warmup`, athleteId, date: iso, warmup: true,
+    assignmentId: w.assignment.id, blockId: w.block.id, week: 0, dayIndex: 0, name: w.block.name,
     entries: s.items.map((it) => ({ ...it, unit: it.unit || unit(), sets: it.sets.map((x) => ({ targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, rpe: x.rpe, reps: null, secs: null, weight: null, done: false })) })),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
