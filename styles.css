@@ -109,7 +109,7 @@ textarea { resize: vertical; }
 /* styled dropdowns (ui.styledSelects): the real <select> is hidden behind a button and menu */
 select.dd-native { display: none; }
 .dd-btn {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px;
   background: #fff; border: var(--thin); color: var(--ink); cursor: pointer; text-align: left;
   font: 600 1rem var(--body); font-stretch: 100%; letter-spacing: 0; text-transform: none;
 }
@@ -479,3 +479,8 @@ button.last b { color: var(--track); white-space: nowrap; }
 /* Sign in / Create account tabs */
 .auth-tabs { display: flex; margin: 0 0 12px; }
 .auth-tabs button { flex: 1; min-height: 44px; font-size: 0.7rem; }
+
+/* Edit / remove pair on a program row; who's on a program; checks for the coach */
+.warn-text { color: var(--warn); font-weight: 600; }
+.danger-link { color: var(--danger); margin-top: 12px; }
+.assigned-note { border-left: 4px solid var(--track); padding: 6px 10px; background: var(--card); margin: 0 0 12px; }

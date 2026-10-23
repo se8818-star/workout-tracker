@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, sessionEntries, refreshEntries, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, sessionEntries, refreshEntries, untouchedLog, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -189,7 +189,7 @@ export function startLog(athleteId, iso, plan) {
 
 export function startWarmupLog(athleteId, iso, w) {
   const existing = warmupLogFor(athleteId, iso);
-  if (existing) return existing;
+  if (existing && existing.blockId === w.block.id) return existing;
   const s = buildSession(w.block, 0, 0, get('athletes', athleteId), roundStep());
   return keepLog({
     id: `${logId(athleteId, iso)}:warmup`, athleteId, date: iso, warmup: true,
@@ -210,6 +210,28 @@ export function refreshLog(log) {
   const name = log.warmup ? log.name : s.name;
   if (name === log.name && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
   return keepLog({ ...log, name, entries });
+}
+
+// The day's log as it should be now. A log the athlete only opened (nothing
+// logged yet) follows the program: if the coach since moved them to another
+// program or day, or removed it, the old workout is replaced or dropped.
+// Logs with anything in them, or a workout the athlete picked, stay put.
+export function currentLog(athleteId, iso) {
+  const log = logFor(athleteId, iso);
+  if (!log || log.chosen || log.switchedFrom !== undefined || !untouchedLog(log)) return refreshLog(log);
+  const plan = plannedOn(athleteId, iso)[0];
+  if (!plan) { if (ownsLogs()) del('logs', log.id); return null; }
+  if (plan.block.id !== log.blockId || plan.week !== log.week || plan.dayIndex !== log.dayIndex) return startLog(athleteId, iso, plan);
+  return refreshLog(log);
+}
+
+export function currentWarmupLog(athleteId, iso) {
+  const log = warmupLogFor(athleteId, iso);
+  if (!log || !untouchedLog(log)) return refreshLog(log);
+  const w = warmupOn(athleteId, iso);
+  if (!w) { if (ownsLogs()) del('logs', log.id); return null; }
+  if (w.block.id !== log.blockId) return startWarmupLog(athleteId, iso, w);
+  return refreshLog(log);
 }
 
 export function saveLog(log) {

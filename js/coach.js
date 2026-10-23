@@ -24,7 +24,10 @@ export function board(root, _p, query) {
     team.tonnage += w.done.tonnage; team.contacts += w.done.contacts; team.done += w.sessionsDone; team.planned += w.sessionsPlanned;
     const lastNote = store.logsFor(a.id).filter((l) => l.finished && (l.note || l.entries.some((e) => e.athleteNote))).pop();
     const noteTxt = lastNote ? (lastNote.note || lastNote.entries.find((e) => e.athleteNote)?.athleteNote) : '';
-    const missed = w.days.filter((d) => d.planned && d.iso < today() && !d.log?.finished).length;
+    // Planned days gone by with nothing finished, less workouts done on other days (moved days aren't missed).
+    const undone = w.days.filter((d) => d.planned && d.iso < today() && !d.log?.finished).length;
+    const moved = w.days.filter((d) => !d.planned && d.iso <= today() && d.log?.finished).length;
+    const missed = Math.max(0, undone - moved);
     const flag = missed ? `<span class="pill warn">${missed} missed</span>` : (trend.ratio > 1.5 ? '<span class="pill warn">load spike</span>' : '');
     return `<tr>
       <td><a href="#/coach/athlete/${a.id}"><b>${esc(a.name)}</b></a><br><small class="muted">${esc(a.group || '')}${hasLogin(a.id) === false ? `${a.group ? ' · ' : ''}not signed up yet` : ''}</small></td>
@@ -69,8 +72,8 @@ export function athlete(root, { id }) {
   const ex = store.exercisesById();
   const u = store.unit();
   const w = weekSummary(id, weekStart(today()));
-  const logs = store.logsFor(id).filter((l) => l.finished).reverse().slice(0, 12);
-  const loaded = store.all('exercises').filter((x) => x.loaded).sort((x, y) => x.name.localeCompare(y.name));
+  const logs = store.logsFor(id).filter((l) => l.finished && !l.warmup).reverse().slice(0, 12);
+  const loaded = store.all('exercises').filter((x) => x.loaded && !x.hidden).sort((x, y) => x.name.localeCompare(y.name));
   const asg = store.assignmentsFor(id);
   root.innerHTML = `
     <header class="page-head"><a class="back" href="#/coach">‹ Team</a><h1>${esc(a.name)}</h1><p class="muted">${esc(a.group || '')}</p>
@@ -82,11 +85,11 @@ export function athlete(root, { id }) {
       ${stat('Session load', w.load, null, ' AU')}
     </div>
     <section class="card"><h3>Programs</h3>
-      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
+      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap"><a class="chip" href="#/coach/assignment/${g.id}">Edit</a><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
       <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
     </section>
     <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
-      <p class="muted small">Prescribed weights come from these. They also update when a logged set beats them.</p>
+      <p class="muted small">Prescribed weights come from these. They also update when a logged set beats them by up to 20%; bigger jumps are flagged below for you to check. Clear a box to remove that max.</p>
       <div class="max-grid">${Object.entries(a.maxes || {}).map(([k, v]) => `<label class="field-row"><span>${esc(ex[k]?.name || k)}</span><input type="number" inputmode="decimal" step="any" value="${store.showW(v)}" data-action="setMax" data-ex="${k}"></label>`).join('')}</div>
       <div class="row gap"><select data-action="noop" id="new-max-ex" aria-label="Exercise">${loaded.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
         <input type="number" id="new-max-val" placeholder="Max" inputmode="decimal" aria-label="Max"><button class="chip" data-action="addMax">Add</button></div>
@@ -102,6 +105,7 @@ export function athlete(root, { id }) {
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
           ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}
+          ${(l.maxFlags || []).map((f) => `<p class="small warn-text">Check: ${esc(ex[f.exerciseId]?.name || '')} suggests a max of ${fmt(store.showW(f.est))} ${u}. Not saved; change it above if it's real.</p>`).join('')}
           ${vids ? `<div class="row gap wrap vids">${vids}</div>` : ''}</div>`;
       }).join('') || '<p class="muted">Nothing logged yet.</p>'}
     </section>
@@ -121,7 +125,10 @@ export function athlete(root, { id }) {
       location.hash = '#/coach';
     },
     playVideo: (el) => videoSheet(el.dataset.path),
-    setMax: (el) => { a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved'); },
+    setMax: (el) => {
+      if (el.value === '' || !Number(el.value)) { delete a.maxes[el.dataset.ex]; store.put('athletes', a); toast('Max removed'); athlete(root, { id }); return; }
+      a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved');
+    },
     setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
     addMax: () => {
       const exId = $('#new-max-ex', root).value, v = Number($('#new-max-val', root).value);
@@ -325,6 +332,8 @@ export function blockEditor(root, { id }, query) {
   for (const d of b.days) for (const it of d.items) if (!it.unit) { it.unit = store.unit(); stamped = true; }
   if (stamped) store.put('blocks', b);
   const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
+  const onIt = [...new Set(store.all('assignments').filter((g) => g.blockId === id).map((g) => store.get('athletes', g.athleteId)?.name).filter(Boolean))].sort();
+  const usedBy = onIt.length ? `<p class="assigned-note small">On this ${isWarmup(b) ? 'warmup' : 'program'}: <b>${esc(onIt.join(', '))}</b>. Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Edit next to the program on their page.</p>` : '';
   const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('');
   const dayCard = (di) => {
     const d = b.days[di];
@@ -365,6 +374,7 @@ export function blockEditor(root, { id }, query) {
   root.innerHTML = isWarmup(b) ? `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Warmup name"></header>
+    ${usedBy}
     <p class="muted small">A saved warmup. <a href="#/coach/assign?block=${b.id}">Assign it</a> to athletes, or load it into a program day from that day's Warmup section. Changes here reach assigned athletes on days they haven't started yet, but not programs that already loaded a copy.</p>
     <section class="card day-card" data-di="0"><div class="sec warm-sec">
       ${warmItems(b.days[0], 0)}
@@ -372,6 +382,7 @@ export function blockEditor(root, { id }, query) {
     </div></section>` : `
     <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Block name"></header>
+    ${usedBy}
     <section class="card row gap wrap">
       <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
       <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
@@ -611,7 +622,7 @@ export function assign(root, _p, query) {
     pickBlock: (el) => { location.hash = `#/coach/assign?block=${el.value}${pre ? `&athlete=${pre}` : ''}`; },
     pickGroup: (el) => { root.querySelectorAll('input[name=ath]').forEach((c) => { if (c.dataset.g === el.dataset.g) c.checked = true; }); },
     pickAll: () => { root.querySelectorAll('input[name=ath]').forEach((c) => { c.checked = true; }); },
-    go: () => {
+    go: async () => {
       const start = $('#as-start', root).value;
       const end = warm ? $('#as-end', root).value : '';
       const weekdays = [...root.querySelectorAll('input[name=wd]:checked')].map((c) => Number(c.value));
@@ -620,6 +631,20 @@ export function assign(root, _p, query) {
       if (warm && !weekdays.length) return toast('Pick at least one day');
       if (!warm && weekdays.length !== block.days.length) return toast(`Pick exactly ${block.days.length} training days`);
       if (end && end < start) return toast('End date is before the start date');
+      // A new program normally takes over from the athlete's current one.
+      const current = warm ? [] : ids.flatMap((aid) => store.assignmentsFor(aid).filter((g) => {
+        const gb = store.get('blocks', g.blockId);
+        return gb && !isWarmup(gb) && (!g.endDate || g.endDate >= start);
+      }));
+      if (current.length) {
+        const names = [...new Set(current.map((g) => store.get('athletes', g.athleteId)?.name))].join(', ');
+        if (await ask(`${names} already ${current.length > 1 ? 'have programs' : 'has a program'}. Replace from ${fmtDate(start)}? Their logged workouts stay.`, { title: 'Replace current program?', ok: 'Replace', cancel: 'Keep both' })) {
+          for (const g of current) {
+            if (g.startDate >= start) store.del('assignments', g.id);
+            else store.put('assignments', { ...g, endDate: addDays(start, -1) });
+          }
+        }
+      }
       for (const athleteId of ids) {
         // One warmup at a time: a new warmup replaces the athlete's current one.
         if (warm) for (const g of store.assignmentsFor(athleteId)) if (isWarmup(store.get('blocks', g.blockId) || {})) store.del('assignments', g.id);
@@ -647,7 +672,7 @@ export function exercises(root, _p, query) {
   // Opened from the program editor: Save and Cancel go back there.
   const back = (query.get('back') || '').startsWith('#/coach/') ? query.get('back') : '#/coach/exercises';
   const uses = editId ? itemsUsing(editId) : [];
-  const list = store.all('exercises').sort((a, b) => a.name.localeCompare(b.name));
+  const list = store.all('exercises').filter((e) => !e.hidden).sort((a, b) => a.name.localeCompare(b.name));
   const x = editId ? (store.get('exercises', editId) || { id: '', name: '', pattern: 'other', body: 'full', loaded: true, alts: [] }) : null;
   const form = x ? `
     <section class="card form" id="ex-form">
@@ -665,6 +690,7 @@ export function exercises(root, _p, query) {
       <label class="field-row"><span>Video link</span><input type="url" id="ex-video" value="${esc(x.video || '')}" placeholder="https://"></label>
       <fieldset><legend>Swap options (same movement)</legend><div class="checks tall">${list.filter((e) => e.id !== x.id).map((e) => `<label class="check-row"><input type="checkbox" name="alt" value="${e.id}" ${x.alts?.includes(e.id) ? 'checked' : ''}> ${esc(e.name)}</label>`).join('')}</div></fieldset>
       <div class="row gap"><button class="btn" data-action="saveEx">Save</button><a class="btn ghost" href="${esc(back)}">Cancel</a></div>
+      ${x.id ? `<button class="link danger-link" data-action="hideEx">Remove from library</button>` : ''}
     </section>` : '';
   root.innerHTML = `
     <header class="page-head"><h1>Exercise library</h1><p class="muted">${list.length} exercises. Plyo contacts and movement type drive the weekly numbers.</p></header>
@@ -677,6 +703,14 @@ export function exercises(root, _p, query) {
   q.addEventListener('input', () => root.querySelectorAll('tr[data-name]').forEach((r) => { r.hidden = !r.dataset.name.includes(q.value.toLowerCase()); }));
   if (x) $('#ex-form', root).scrollIntoView({ block: 'start' });
   bindActions(root, {
+    // Hidden rather than deleted, so past workouts and programs keep its name.
+    hideEx: async () => {
+      const msg = uses.length ? `It stays in the ${uses.length} program item${uses.length > 1 ? 's' : ''} that use it, and in past workouts, but can't be picked anymore.` : 'Past workouts keep its name. It just can\'t be picked anymore.';
+      if (!await ask(msg, { title: `Remove "${x.name}"?`, ok: 'Remove', danger: true })) return;
+      store.put('exercises', { ...x, hidden: true });
+      toast('Removed from the library');
+      location.hash = '#/coach/exercises';
+    },
     saveEx: () => {
       const v = (s) => $(s, root).value;
       const name = v('#ex-name').trim();
@@ -703,6 +737,60 @@ export function exercises(root, _p, query) {
       }
       toast(changed.size ? `Saved. Updated ${changed.size} program${changed.size > 1 ? 's' : ''}.` : 'Saved');
       location.hash = back;
+    },
+  });
+}
+
+// ---------- one athlete's program ----------
+
+// Change an assignment in place: its days, start and end. The program itself
+// is edited in the block editor (for everyone on it), or copied just for this
+// athlete first. Logged workouts are never touched.
+export function assignmentEditor(root, { id }) {
+  const g = store.get('assignments', id);
+  const b = g && store.get('blocks', g.blockId);
+  const a = g && store.get('athletes', g.athleteId);
+  if (!g || !b || !a) { root.innerHTML = '<p class="empty">Program not found.</p>'; return; }
+  const warm = isWarmup(b);
+  const others = [...new Set(store.all('assignments').filter((x) => x.blockId === b.id && x.athleteId !== a.id).map((x) => store.get('athletes', x.athleteId)?.name).filter(Boolean))];
+  const first = a.name.split(' ')[0];
+  root.innerHTML = `
+    <header class="page-head"><a class="back" href="#/coach/athlete/${a.id}">‹ ${esc(a.name)}</a>
+      <span class="kicker">${warm ? 'Warmup' : 'Program'} for ${esc(a.name)}</span><h1>${esc(b.name)}</h1></header>
+    <section class="card form ${warm ? 'warm-form' : ''}"><h3>Schedule</h3>
+      <label class="field-row"><span>Start date</span><input type="date" id="ae-start" value="${g.startDate}"></label>
+      <label class="field-row"><span>End date (optional)</span><input type="date" id="ae-end" value="${g.endDate || ''}"></label>
+      <fieldset><legend>${warm ? 'Days to do it' : `Training days (${b.days.length} per week, in order)`}</legend>
+        <div class="row gap wrap">${WEEKDAYS.map((d, i) => `<label class="check-chip"><input type="checkbox" name="wd" value="${i}" ${(g.weekdays || []).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></fieldset>
+      <p class="muted small">Workouts ${esc(first)} already logged stay where they are. Days not started yet follow the new schedule. Moving the start date also moves which week of the program each day falls in.</p>
+      <button class="btn wide" data-action="save">Save schedule</button>
+    </section>
+    <section class="card"><h3>Exercises, sets and reps</h3>
+      ${others.length ? `<p class="muted small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this ${warm ? 'warmup' : 'program'} too. Editing it changes it for everyone. Make a copy to change it just for ${esc(first)}.</p>
+        <div class="row gap wrap"><button class="btn" data-action="copy">Make a copy just for ${esc(first)}</button><a class="btn ghost" href="#/coach/block/${b.id}">Edit for everyone</a></div>`
+        : `<p class="muted small">Changes reach ${esc(first)}'s days that haven't been started. Finished workouts stay as logged.</p><a class="btn" href="#/coach/block/${b.id}">Edit ${warm ? 'warmup' : 'program'}</a>`}
+    </section>`;
+  bindActions(root, {
+    save: () => {
+      const start = $('#ae-start', root).value, end = $('#ae-end', root).value;
+      const weekdays = [...root.querySelectorAll('input[name=wd]:checked')].map((c) => Number(c.value));
+      if (!start) return toast('Pick a start date');
+      if (end && end < start) return toast('End date is before the start date');
+      if (warm && !weekdays.length) return toast('Pick at least one day');
+      if (!warm && weekdays.length !== b.days.length) return toast(`Pick exactly ${b.days.length} training days`);
+      const next = { ...g, startDate: start, weekdays };
+      if (end) next.endDate = end; else delete next.endDate;
+      store.put('assignments', next);
+      toast('Schedule saved');
+      location.hash = `#/coach/athlete/${a.id}`;
+    },
+    copy: () => {
+      const c = structuredClone(b);
+      c.id = store.uid('block'); c.name = `${b.name} (${first})`;
+      store.put('blocks', c);
+      store.put('assignments', { ...g, blockId: c.id });
+      toast(`Copied. Changes here only reach ${first}.`);
+      location.hash = `#/coach/block/${c.id}`;
     },
   });
 }

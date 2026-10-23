@@ -34,7 +34,7 @@ export function weekSummary(athleteId, monday) {
 // 7-day vs 28-day average session load. Above ~1.5 is a big jump worth a conversation.
 export function loadTrend(athleteId, todayIso) {
   let acute = 0, chronic = 0;
-  const logs = store.logsFor(athleteId);
+  const logs = store.logsFor(athleteId).filter((l) => !l.warmup);
   // The ratio means little until there are about three weeks of history.
   const enough = logs.length && Math.round((new Date(todayIso) - new Date(logs[0].date)) / 86400000) >= 21;
   for (const l of logs) {

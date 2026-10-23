@@ -7,6 +7,8 @@ import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, ba
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
+// A finished workout raises a max by at most this factor on its own.
+const MAX_JUMP = 1.2;
 
 // A coach looking at an athlete's pages gets a way back to that athlete's coach page.
 function coachBack(id) {
@@ -85,9 +87,9 @@ export function today_(root, { id }, query) {
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const iso = query.get('d') || today();
   const plans = store.plannedOn(id, iso);
-  const log = store.refreshLog(store.logFor(id, iso));
+  const log = store.currentLog(id, iso);
   // The assigned warmup gets its own card, above the workout.
-  const wlog = store.refreshLog(store.warmupLogFor(id, iso)), w = store.warmupOn(id, iso);
+  const wlog = store.currentWarmupLog(id, iso), w = store.warmupOn(id, iso);
   const warm = wlog ? workoutCard(id, iso, 'Warmup', wlog.name, wlog.entries.length, wlog, true)
     : w ? workoutCard(id, iso, 'Warmup', w.block.name, w.block.days[0].items.length, null, true) : '';
 
@@ -113,6 +115,7 @@ export function today_(root, { id }, query) {
     goDate: (el) => { location.hash = `#/athlete/${id}?d=${el.dataset.date}`; },
     switch: () => switchSheet(id, iso, (plan) => {
       const l = store.startLog(id, iso, plan);
+      l.chosen = true; // picked by the athlete, so it stays even with nothing logged
       store.saveLog(l);
       closeSheet();
       location.hash = `#/athlete/${id}/session/${iso}`;
@@ -187,7 +190,7 @@ export function session(root, { id, date, warm = false }) {
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const plans = warm ? [] : store.plannedOn(id, date);
-  let log = store.refreshLog(warm ? store.warmupLogFor(id, date) : store.logFor(id, date));
+  let log = warm ? store.currentWarmupLog(id, date) : store.currentLog(id, date);
   if (!log) {
     const w = warm && store.warmupOn(id, date);
     if (!w && !plans.length) { location.hash = `#/athlete/${id}?d=${date}`; return; }
@@ -271,16 +274,23 @@ export function session(root, { id, date, warm = false }) {
     sessionNote: (el) => { log.note = el.value; persist(); },
     finish: () => {
       log.finished = true;
-      // Update maxes when a logged set beats the estimated 1RM on file.
-      const prs = [];
+      // Update maxes when a logged set beats the estimated 1RM on file. A jump
+      // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
+      // left for the coach to confirm instead of changing every future load.
+      const prs = [], odd = [];
+      delete log.maxFlags;
       for (const e of log.entries) {
         const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
         const cur = athlete.maxes?.[e.exerciseId];
-        if (cur && best > cur) { athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(store.get('exercises', e.exerciseId)?.name); }
+        if (!cur || best <= cur) continue;
+        const name = store.get('exercises', e.exerciseId)?.name;
+        if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
+        athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
       }
       if (prs.length) store.put('athletes', athlete);
       store.saveLog(log);
-      toast(prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : warm ? 'Warmup saved' : 'Workout saved');
+      toast(odd.length ? `Saved. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
+        : prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : warm ? 'Warmup saved' : 'Workout saved');
       location.hash = `#/athlete/${id}?d=${date}`;
     },
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
@@ -432,22 +442,25 @@ function swapSheet(log, i, done) {
   const ex = store.get('exercises', entry.exerciseId);
   const original = entry.swappedFrom || entry.exerciseId;
   const alts = [...new Set([...(store.get('exercises', original)?.alts || []), original])].filter((x) => x !== entry.exerciseId);
-  const list = alts.map((a) => store.get('exercises', a)).filter(Boolean);
+  const list = alts.map((a) => store.get('exercises', a)).filter((x) => x && (!x.hidden || x.id === original));
   const html = `<p class="muted">Same movement as ${esc(ex?.name)}. Your sets and reps stay the same.</p>
     <ul class="pick">${list.map((x) => `<li><button data-pick="${x.id}">${esc(x.name)}${x.id === original ? ' <small>(original)</small>' : ''}</button></li>`).join('') || '<li class="muted">No swaps set up for this exercise yet.</li>'}</ul>
     <button class="link" data-other>Pick any other exercise…</button>`;
+  const swapTo = (to) => {
+    entry.swappedFrom = to === original ? undefined : original;
+    entry.exerciseId = to;
+    // The old weight belongs to the old exercise; keep reps, clear the load.
+    entry.sets.forEach((s) => { if (!s.done) { s.weight = null; s.targetWeight = null; delete s.targetPct; } });
+  };
   sheet('Swap exercise', html, (w) => {
     w.addEventListener('click', (e) => {
       const b = e.target.closest('[data-pick]');
       if (b) {
         const to = b.dataset.pick;
-        entry.swappedFrom = to === original ? undefined : original;
-        entry.exerciseId = to;
-        // The old weight belongs to the old exercise; keep reps, clear the load.
-        entry.sets.forEach((s) => { if (!s.done) { s.weight = null; s.targetWeight = null; } });
+        swapTo(to);
         closeSheet(); done();
       }
-      if (e.target.closest('[data-other]')) pickExerciseSheet((to) => { entry.swappedFrom = original; entry.exerciseId = to; done(); });
+      if (e.target.closest('[data-other]')) pickExerciseSheet((to) => { swapTo(to); done(); });
     });
   });
 }
@@ -455,7 +468,7 @@ function swapSheet(log, i, done) {
 // With allowNew (coach side), typing a name that isn't in the library offers
 // to create it on the spot.
 export function pickExerciseSheet(onPick, { allowNew = false } = {}) {
-  const all = store.all('exercises').sort((a, b) => a.name.localeCompare(b.name));
+  const all = store.all('exercises').filter((x) => !x.hidden).sort((a, b) => a.name.localeCompare(b.name));
   const html = `<input type="search" class="search" placeholder="Search exercises" aria-label="Search exercises">
     ${allowNew ? '<button class="btn ghost wide pick-new" data-new hidden></button>' : ''}
     <ul class="pick">${all.map((x) => `<li data-name="${esc(x.name.toLowerCase())}"><button data-pick="${x.id}">${esc(x.name)} <small>${PATTERN_LABEL[x.pattern] || ''}</small></button></li>`).join('')}</ul>`;
@@ -569,7 +582,7 @@ export function week(root, { id }, query) {
 }
 
 export function history(root, { id }) {
-  const logs = store.logsFor(id).filter((l) => l.finished).reverse();
+  const logs = store.logsFor(id).filter((l) => l.finished && !l.warmup).reverse();
   const ex = store.exercisesById();
   const u = store.unit();
   const athlete = store.get('athletes', id);
@@ -580,7 +593,7 @@ export function history(root, { id }) {
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
-      return `<a class="card log-row" href="#/athlete/${id}?d=${l.date}">
+      return `<a class="card log-row" href="#/athlete/${id}/session/${l.date}">
         <div><b>${esc(l.name)}</b><p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
         <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;

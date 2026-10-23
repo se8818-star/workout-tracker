@@ -30,3 +30,36 @@ test('marks from older versions still read as deleted or not', () => {
   assert.ok(store.isDeleted('deleted'));
   assert.ok(!store.isDeleted(true));
 });
+
+const blockOf = (id, name) => ({ id, name, weeks: 4, deloadWeek: null, days: [{ name: `${name} A`, items: [{ exerciseId: 'sq', sets: 2, reps: 5 }] }] });
+
+test('an opened but untouched day follows a program change', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('old', 'Old'));
+  store.put('blocks', blockOf('new', 'New'));
+  store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'old', startDate: '2026-10-19', weekdays: [0] });
+  store.startLog('a', '2026-10-19', store.plannedOn('a', '2026-10-19')[0]); // the athlete opens the day
+  assert.equal(store.currentLog('a', '2026-10-19').blockId, 'old');
+  // Coach ends the old program and starts a new one the same day.
+  store.put('assignments', { ...store.get('assignments', 'g1'), endDate: '2026-10-18' });
+  store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'new', startDate: '2026-10-19', weekdays: [0] });
+  assert.equal(store.currentLog('a', '2026-10-19').blockId, 'new');
+  // Once something is logged the day stays as it is.
+  const log = store.logFor('a', '2026-10-19');
+  log.entries[0].sets[0].done = true;
+  store.saveLog(log);
+  store.del('assignments', 'g2');
+  assert.equal(store.currentLog('a', '2026-10-19').blockId, 'new');
+});
+
+test('an untouched day with no program left is dropped, a picked one stays', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('b', 'B'));
+  store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'b', startDate: '2026-10-19', weekdays: [0] });
+  store.startLog('a', '2026-10-19', store.plannedOn('a', '2026-10-19')[0]);
+  store.del('assignments', 'g1');
+  assert.equal(store.currentLog('a', '2026-10-19'), null);
+  const picked = store.startLog('a', '2026-10-20', { assignment: { id: 'g1' }, block: store.get('blocks', 'b'), week: 0, dayIndex: 0 });
+  picked.chosen = true; store.saveLog(picked);
+  assert.ok(store.currentLog('a', '2026-10-20'));
+});
