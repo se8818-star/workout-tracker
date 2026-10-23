@@ -5,7 +5,7 @@
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import * as store from './store.js';
-import { esc, bindActions, toast, $ } from './ui.js';
+import { esc, bindActions, toast, ask, sheet, closeSheet, $ } from './ui.js';
 
 export const cloudEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && !new URLSearchParams(location.search).has('demo');
 
@@ -18,6 +18,19 @@ let rerender = () => {};
 let pushTimer = null;
 
 export const teamInfo = () => membership;
+
+// Coach only: which athlete records have a login. null until loaded.
+let logins = null;
+export const hasLogin = (athleteId) => (logins ? logins.has(athleteId) : null);
+async function loadLogins() {
+  if (membership?.role !== 'coach') return false;
+  const { data, error } = await sb.from('members').select('athlete_id').eq('team_id', membership.team_id);
+  if (error) return false;
+  const next = new Set(data.map((m) => m.athlete_id).filter(Boolean));
+  const changed = !logins || next.size !== logins.size || [...next].some((x) => !logins.has(x));
+  logins = next;
+  return changed;
+}
 
 export async function startSync(render) {
   rerender = render;
@@ -74,25 +87,35 @@ export async function syncNow() {
   if (!membership || !navigator.onLine) return;
   await push();
   await pull();
+  if (await loadLogins()) rerender();
 }
 
+// One upload at a time; a change made during an upload goes in the next one.
+let pushing = null;
 async function push() {
+  if (pushing) { await pushing; return push(); }
+  pushing = pushDirty().finally(() => { pushing = null; });
+  return pushing;
+}
+
+async function pushDirty() {
   if (!membership || !navigator.onLine) return;
   const dirty = store.dirtyKeys();
   if (!dirty.length) return;
-  const rows = dirty.map(([key, val]) => {
+  const rows = dirty.map(([key, mark]) => {
     const [kind, id] = key.split('/');
     const rec = store.get(kind, id);
-    return { team_id: membership.team_id, kind, id, data: rec || {}, deleted: val === 'deleted' || !rec };
+    const deleted = store.isDeleted(mark) || !rec;
+    return { team_id: membership.team_id, kind, id, data: rec || mark?.data || {}, deleted };
   });
   const { error } = await sb.from('records').upsert(rows);
-  if (!error) { store.clearDirty(dirty.map(([k]) => k)); return; }
+  if (!error) { store.clearDirty(dirty); return; }
   // One bad row (e.g. an athlete editing something only a coach may) fails the
   // batch, so retry row by row and drop the ones the server refuses.
   const done = [];
   for (let i = 0; i < rows.length; i++) {
     const r = await sb.from('records').upsert(rows[i]);
-    if (!r.error || r.error.code === '42501') done.push(dirty[i][0]);
+    if (!r.error || r.error.code === '42501') done.push(dirty[i]);
   }
   store.clearDirty(done);
 }
@@ -159,13 +182,13 @@ function loginView(root, mode = 'signin', sentTo = '') {
   let body;
   if (create) {
     body = `
-        <p class="muted">New here? Ask your coach for the 6-letter team code.</p>
+        <p class="muted">New here? Ask your coach for the 6-character team code.</p>
         <label class="field-row"><span>Your name</span><input id="lg-name" autocomplete="name" value="${esc(pending?.name || '')}"></label>
         ${emailField}
         <label class="field-row"><span>Password</span><input type="password" id="lg-pw" autocomplete="new-password" placeholder="${MIN_PASSWORD}+ characters"></label>
         <label class="field-row"><span>Team code</span><input id="lg-team" maxlength="6" autocapitalize="characters" value="${esc(pending?.code || '')}"></label>
         <label class="field-row"><span>Group</span><input id="lg-group" placeholder="e.g. Pitchers (optional)" value="${esc(pending?.group || '')}"></label>
-        ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b></p>` : ''}
+        ${pending?.team ? `<p class="small">Joining <b>${esc(pending.team)}</b>${pending.claimName ? ` as <b>${esc(pending.claimName)}</b>` : ''}</p>` : ''}
         ${sentTo ? codeStep : `<p class="muted small">We'll email you a code once to confirm it's you.</p><button class="btn wide" data-action="send">Continue</button>`}`;
   } else if (mode === 'code') {
     body = `
@@ -217,7 +240,9 @@ function loginView(root, mode = 'signin', sentTo = '') {
         // Check the code before emailing, so a typo doesn't make an account with no team.
         const { data: team, error: teamErr } = await sb.rpc('team_for_code', { code });
         if (!teamErr && !team) return toast('No team with that code. Check it with your coach.');
-        writePending({ name, code, group: $('#lg-group', root).value.trim(), team: team || '' });
+        const pick = await pickClaim(code);
+        if (!pick) return;
+        writePending({ name, code, group: $('#lg-group', root).value.trim(), team: team || '', claim: pick.claim, claimName: pick.name });
         pendingPassword = password;
       }
       const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: create } });
@@ -245,12 +270,33 @@ function loginView(root, mode = 'signin', sentTo = '') {
       }
       const join = create && readPending();
       if (join) {
-        const r = await sb.rpc('join_team', { code: join.code, athlete_name: join.name, athlete_group: join.group });
+        const r = await sb.rpc('join_team', { code: join.code, athlete_name: join.name, athlete_group: join.group, claim: join.claim || null });
         if (r.error) toast(r.error.message);
         else writePending(null);
       }
       await finish();
     },
+  });
+}
+
+// Names the coach added by hand that have no login yet. Someone joining picks
+// theirs so they get the programs already assigned to it. Resolves
+// { claim: id | null, name } or null if they close the list.
+async function pickClaim(code) {
+  const { data } = await sb.rpc('unclaimed_athletes', { code });
+  const list = Array.isArray(data) ? data : [];
+  if (!list.length) return { claim: null, name: '' };
+  return new Promise((resolve) => {
+    const wrap = sheet('Which one is you?', `<p class="muted">Your coach already added these names. Pick yours to get the programs they set up for you.</p>
+      <ul class="pick">${list.map((a) => `<li><button data-claim="${esc(a.id)}" data-name="${esc(a.name)}">${esc(a.name)} <small>${esc(a.group || '')}</small></button></li>`).join('')}</ul>
+      <button class="btn ghost wide" data-claim="">I'm not on this list</button>`);
+    wrap._onClose = () => resolve(null);
+    wrap.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-claim]');
+      if (!b) return;
+      wrap._onClose = null; closeSheet();
+      resolve({ claim: b.dataset.claim || null, name: b.dataset.name || '' });
+    });
   });
 }
 
@@ -273,7 +319,10 @@ function teamView(root) {
   });
   bindActions(root, {
     join: async () => {
-      const { error } = await sb.rpc('join_team', { code: $('#tm-code', root).value, athlete_name: $('#tm-name', root).value.trim(), athlete_group: $('#tm-group', root).value.trim() });
+      const code = $('#tm-code', root).value;
+      const pick = await pickClaim(code);
+      if (!pick) return;
+      const { error } = await sb.rpc('join_team', { code, athlete_name: $('#tm-name', root).value.trim(), athlete_group: $('#tm-group', root).value.trim(), claim: pick.claim });
       if (error) return toast(error.message);
       location.reload();
     },
@@ -357,7 +406,11 @@ export async function setPassword(password) {
   if (error) throw error;
 }
 
+// Signing out erases this device's copy, so upload anything still waiting first.
 export async function signout() {
+  if (membership && navigator.onLine) await push().catch((e) => console.warn(e));
+  const waiting = store.dirtyKeys().length;
+  if (waiting && !await ask(`${waiting} change${waiting > 1 ? 's' : ''} on this phone (like logged sets) haven't reached the server yet${navigator.onLine ? '' : ' because there\'s no connection'}. Signing out now deletes them. Wait until you have signal and try again.`, { title: 'Not uploaded yet', ok: 'Sign out anyway', cancel: 'Stay signed in', danger: true })) return;
   if (sb) await sb.auth.signOut();
   store.clearAll();
   location.reload();

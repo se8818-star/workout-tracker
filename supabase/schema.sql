@@ -69,6 +69,20 @@ drop trigger if exists records_keep_finished on records;
 create trigger records_keep_finished before update on records
   for each row execute function keep_finished_log();
 
+-- A delete keeps the record's last contents, so the policies below can still
+-- tell whose it was and an athlete's phone sees its own program being removed.
+-- (Older app versions sent deletes with empty data.)
+create or replace function keep_deleted_data() returns trigger
+language plpgsql as $$
+begin
+  if new.deleted and new.data = '{}'::jsonb then new.data := old.data; end if;
+  return new;
+end $$;
+
+drop trigger if exists records_keep_deleted on records;
+create trigger records_keep_deleted before update on records
+  for each row execute function keep_deleted_data();
+
 -- Safety net: before a record is replaced, its previous version is copied to
 -- records_history and kept 30 days, so a lost workout can be restored from the
 -- SQL editor. The app never reads it (no policies, so only you can).
@@ -179,14 +193,42 @@ language sql stable security definer set search_path = public as $$
   select name from teams where join_code = upper(trim(code));
 $$;
 
--- An athlete joins with the coach's code; creates their athlete record.
-create or replace function join_team(code text, athlete_name text, athlete_group text default '') returns uuid
+-- One login per athlete record.
+create unique index if not exists members_one_login_per_athlete on members (team_id, athlete_id) where athlete_id is not null;
+
+-- Athletes the coach added by hand who have no login yet, so someone signing
+-- up with the team code can pick their own name. Needs the code, like
+-- team_for_code. Returns [] when the code is wrong.
+create or replace function unclaimed_athletes(code text) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'name', r.data->>'name', 'group', r.data->>'group') order by r.data->>'name'), '[]'::jsonb)
+  from teams t
+  join records r on r.team_id = t.id and r.kind = 'athletes' and not r.deleted
+  where t.join_code = upper(trim(code))
+    and not exists (select 1 from members m where m.team_id = t.id and m.athlete_id = r.id);
+$$;
+
+-- An athlete joins with the coach's code. With `claim`, they take over an
+-- athlete record the coach already made (and its programs); otherwise a new
+-- athlete record is created.
+drop function if exists join_team(text, text, text);
+create or replace function join_team(code text, athlete_name text, athlete_group text default '', claim text default null) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare t uuid; aid text;
 begin
   select id into t from teams where join_code = upper(trim(code));
   if t is null then raise exception 'No team with that code'; end if;
   if exists (select 1 from members where team_id = t and user_id = auth.uid()) then return t; end if;
+  if claim is not null and claim <> '' then
+    if not exists (select 1 from records where team_id = t and kind = 'athletes' and id = claim and not deleted) then
+      raise exception 'That name is no longer on the team. Ask your coach.';
+    end if;
+    if exists (select 1 from members where team_id = t and athlete_id = claim) then
+      raise exception 'Someone already signed up as that athlete. Ask your coach.';
+    end if;
+    insert into members (user_id, team_id, role, athlete_id) values (auth.uid(), t, 'athlete', claim);
+    return t;
+  end if;
   aid := 'ath-' || substr(md5(random()::text), 1, 10);
   insert into members (user_id, team_id, role, athlete_id) values (auth.uid(), t, 'athlete', aid);
   insert into records (team_id, kind, id, data)
@@ -207,7 +249,8 @@ grant execute on function create_team(text) to authenticated;
 grant execute on function remove_athlete(uuid, text) to authenticated;
 grant execute on function can_coach() to authenticated;
 grant execute on function team_for_code(text) to anon, authenticated;
-grant execute on function join_team(text, text, text) to authenticated;
+grant execute on function join_team(text, text, text, text) to authenticated;
+grant execute on function unclaimed_athletes(text) to anon, authenticated;
 
 -- Form-check videos: a private Storage bucket. Files sit under
 -- <team id>/<athlete id>/. The coach sees every clip in the team; an athlete
