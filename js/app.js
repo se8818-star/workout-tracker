@@ -20,6 +20,7 @@ const routes = [
   [/^\/coach\/blocks$/, coachViews.blocks],
   [/^\/coach\/block\/([^/]+)$/, coachViews.blockEditor, ['id']],
   [/^\/coach\/assign$/, coachViews.assign],
+  [/^\/coach\/assignment\/([^/]+)$/, coachViews.assignmentEditor, ['id']],
   [/^\/coach\/exercises$/, coachViews.exercises],
   [/^\/settings$/, settingsView],
 ];

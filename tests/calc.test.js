@@ -204,3 +204,10 @@ test('athlete-added weight counts toward tonnage', () => {
   const log = { entries: [{ exerciseId: 'box', load: true, sets: [{ reps: 5, weight: 20, done: true }] }] };
   assert.equal(sessionTotals(log, ex).tonnage, 100);
 });
+
+test('an ended assignment stops after its end date', () => {
+  const b = { weeks: 4, days: [{ name: 'A', items: [] }] };
+  const a = { startDate: '2026-10-19', weekdays: [0], endDate: '2026-10-25' };
+  assert.deepEqual(scheduledOn(a, b, '2026-10-19'), { week: 0, dayIndex: 0 });
+  assert.equal(scheduledOn(a, b, '2026-10-26'), null);
+});

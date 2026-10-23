@@ -145,7 +145,7 @@ export function sessionEntries(s, unit) {
 }
 
 const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit;
-const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
+export const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
 
 // A day's log is made the first time the athlete opens it, but the coach can
 // still edit the block after that. Bring the block's current plan into the
@@ -271,11 +271,17 @@ export function weekStart(iso) {
   return toISO(d);
 }
 
-// Where an assignment lands on a date. Training days are spread over the week
+// Nothing logged yet: no ticks, numbers, notes or session details.
+export function untouchedLog(log) {
+  return !log.finished && log.sessionRpe == null && log.minutes == null && !log.note && log.entries.every(untouchedEntry);
+}
+
+// Where an assignment lands on a date. An optional endDate (a replaced
+// program) stops it after that day. Training days are spread over the week
 // by `assignment.weekdays` (0 = Monday). Returns {week, dayIndex} or null.
 export function scheduledOn(assignment, block, iso) {
   const offset = daysBetween(assignment.startDate, iso);
-  if (offset < 0) return null;
+  if (offset < 0 || (assignment.endDate && iso > assignment.endDate)) return null;
   const week = Math.floor(offset / 7);
   if (week >= block.weeks) return null;
   const startDow = (parseISO(assignment.startDate).getDay() + 6) % 7;
