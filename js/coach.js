@@ -6,7 +6,7 @@ import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
-import { removeAthleteLogin, removeVideos, videoFresh } from './sync.js';
+import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled } from './sync.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -27,7 +27,7 @@ export function board(root, _p, query) {
     const missed = w.days.filter((d) => d.planned && d.iso < today() && !d.log?.finished).length;
     const flag = missed ? `<span class="pill warn">${missed} missed</span>` : (trend.ratio > 1.5 ? '<span class="pill warn">load spike</span>' : '');
     return `<tr>
-      <td><a href="#/coach/athlete/${a.id}"><b>${esc(a.name)}</b></a><br><small class="muted">${esc(a.group || '')}</small></td>
+      <td><a href="#/coach/athlete/${a.id}"><b>${esc(a.name)}</b></a><br><small class="muted">${esc(a.group || '')}${hasLogin(a.id) === false ? `${a.group ? ' · ' : ''}not signed up yet` : ''}</small></td>
       <td>${w.sessionsDone}/${w.sessionsPlanned} ${flag}</td>
       <td>${fmt(store.showW(w.done.tonnage))}</td>
       <td>${fmt(w.done.contacts)}</td>
@@ -55,6 +55,7 @@ export function board(root, _p, query) {
       const f = await askFields('Add athlete', [{ k: 'name', label: 'Name' }, { k: 'group', label: 'Group', placeholder: 'e.g. Pitchers' }], { ok: 'Add athlete' });
       if (!f) return;
       store.put('athletes', { id: store.uid('ath'), name: f.name, group: f.group, maxes: {} });
+      if (cloudEnabled) toast(`Added. When ${f.name} signs up with the team code, they pick their name and get what you assigned.`);
       board(root, _p, query);
     },
   });
