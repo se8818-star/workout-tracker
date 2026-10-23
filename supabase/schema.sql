@@ -69,6 +69,20 @@ drop trigger if exists records_keep_finished on records;
 create trigger records_keep_finished before update on records
   for each row execute function keep_finished_log();
 
+-- A delete keeps the record's last contents, so the policies below can still
+-- tell whose it was and an athlete's phone sees its own program being removed.
+-- (Older app versions sent deletes with empty data.)
+create or replace function keep_deleted_data() returns trigger
+language plpgsql as $$
+begin
+  if new.deleted and new.data = '{}'::jsonb then new.data := old.data; end if;
+  return new;
+end $$;
+
+drop trigger if exists records_keep_deleted on records;
+create trigger records_keep_deleted before update on records
+  for each row execute function keep_deleted_data();
+
 -- Safety net: before a record is replaced, its previous version is copied to
 -- records_history and kept 30 days, so a lost workout can be restored from the
 -- SQL editor. The app never reads it (no policies, so only you can).

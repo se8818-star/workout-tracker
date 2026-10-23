@@ -5,7 +5,7 @@
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import * as store from './store.js';
-import { esc, bindActions, toast, $ } from './ui.js';
+import { esc, bindActions, toast, ask, $ } from './ui.js';
 
 export const cloudEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && !new URLSearchParams(location.search).has('demo');
 
@@ -76,23 +76,32 @@ export async function syncNow() {
   await pull();
 }
 
+// One upload at a time; a change made during an upload goes in the next one.
+let pushing = null;
 async function push() {
+  if (pushing) { await pushing; return push(); }
+  pushing = pushDirty().finally(() => { pushing = null; });
+  return pushing;
+}
+
+async function pushDirty() {
   if (!membership || !navigator.onLine) return;
   const dirty = store.dirtyKeys();
   if (!dirty.length) return;
-  const rows = dirty.map(([key, val]) => {
+  const rows = dirty.map(([key, mark]) => {
     const [kind, id] = key.split('/');
     const rec = store.get(kind, id);
-    return { team_id: membership.team_id, kind, id, data: rec || {}, deleted: val === 'deleted' || !rec };
+    const deleted = store.isDeleted(mark) || !rec;
+    return { team_id: membership.team_id, kind, id, data: rec || mark?.data || {}, deleted };
   });
   const { error } = await sb.from('records').upsert(rows);
-  if (!error) { store.clearDirty(dirty.map(([k]) => k)); return; }
+  if (!error) { store.clearDirty(dirty); return; }
   // One bad row (e.g. an athlete editing something only a coach may) fails the
   // batch, so retry row by row and drop the ones the server refuses.
   const done = [];
   for (let i = 0; i < rows.length; i++) {
     const r = await sb.from('records').upsert(rows[i]);
-    if (!r.error || r.error.code === '42501') done.push(dirty[i][0]);
+    if (!r.error || r.error.code === '42501') done.push(dirty[i]);
   }
   store.clearDirty(done);
 }
@@ -357,7 +366,11 @@ export async function setPassword(password) {
   if (error) throw error;
 }
 
+// Signing out erases this device's copy, so upload anything still waiting first.
 export async function signout() {
+  if (membership && navigator.onLine) await push().catch((e) => console.warn(e));
+  const waiting = store.dirtyKeys().length;
+  if (waiting && !await ask(`${waiting} change${waiting > 1 ? 's' : ''} on this phone (like logged sets) haven't reached the server yet${navigator.onLine ? '' : ' because there\'s no connection'}. Signing out now deletes them. Wait until you have signal and try again.`, { title: 'Not uploaded yet', ok: 'Sign out anyway', cancel: 'Stay signed in', danger: true })) return;
   if (sb) await sb.auth.signOut();
   store.clearAll();
   location.reload();

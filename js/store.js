@@ -73,22 +73,36 @@ export function all(kind) { return Object.values(db[kind]); }
 export function get(kind, id) { return db[kind][id] || null; }
 export function exercisesById() { return db.exercises; }
 
+// Each change gets a new number in `dirty`, so an upload only clears the
+// changes it actually sent: a set ticked while it was on its way stays queued.
+let seq = 0;
+const mark = () => `${Date.now()}.${seq++}`;
+
 export function put(kind, obj) {
   obj.updatedAt = new Date().toISOString();
   db[kind][obj.id] = obj;
-  db.dirty[`${kind}/${obj.id}`] = true;
+  db.dirty[`${kind}/${obj.id}`] = { n: mark() };
   save();
   return obj;
 }
 
+// A deleted record keeps its contents on the server, so the database can still
+// tell whose it was and the athlete's phone hears about the delete too.
 export function del(kind, id) {
+  const data = db[kind][id];
   delete db[kind][id];
-  db.dirty[`${kind}/${id}`] = 'deleted';
+  db.dirty[`${kind}/${id}`] = { n: mark(), deleted: true, ...(data ? { data } : {}) };
   save();
 }
 
+// [[key, mark]]; mark is { n, deleted?, data? } (true / 'deleted' from older versions).
 export const dirtyKeys = () => Object.entries(db.dirty);
-export function clearDirty(keys) { for (const k of keys) delete db.dirty[k]; save(); }
+export const isDeleted = (mark) => mark === 'deleted' || Boolean(mark?.deleted);
+// Clear only marks that haven't changed since they were read: [[key, mark]].
+export function clearDirty(entries) {
+  for (const [k, m] of entries) if (db.dirty[k] === m) delete db.dirty[k];
+  save();
+}
 
 export function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
