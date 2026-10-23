@@ -181,3 +181,26 @@ test('coach edits after a day was opened reach the athlete without touching logg
   assert.deepEqual([b[1].sets[0].weight, b[1].sets[0].targetWeight], [40, null]);
   assert.equal(b[1].sets[1].targetWeight, 50);
 });
+
+test('weight box follows the exercise unless the athlete changed it', () => {
+  assert.equal(calc.logsWeight({ exerciseId: 'squat' }, ex.squat), true);
+  assert.equal(calc.logsWeight({ exerciseId: 'box' }, ex.box), false);
+  assert.equal(calc.logsWeight({ exerciseId: 'box', load: true }, ex.box), true);
+  assert.equal(calc.logsWeight({ exerciseId: 'squat', load: false }, ex.squat), false);
+  assert.equal(calc.logsWeight({ exerciseId: 'squat', load: true, measure: 'breaths' }, ex.squat), false);
+});
+
+test('an athlete-edited entry keeps its measure when the block changes', () => {
+  const set = { targetReps: 5, targetSecs: null, targetWeight: null, reps: null, secs: null, weight: null, done: false };
+  const mine = [{ exerciseId: 'box', measure: 'breaths', load: true, athleteEdited: true, sets: [set] }];
+  const fresh = [{ exerciseId: 'box', measure: 'time', sets: [{ ...set, targetReps: null, targetSecs: 30 }] }];
+  const [e] = calc.refreshEntries(mine, fresh);
+  assert.equal(e.measure, 'breaths');
+  assert.equal(e.load, true);
+  assert.equal(e.sets[0].targetSecs, 30);
+});
+
+test('athlete-added weight counts toward tonnage', () => {
+  const log = { entries: [{ exerciseId: 'box', load: true, sets: [{ reps: 5, weight: 20, done: true }] }] };
+  assert.equal(sessionTotals(log, ex).tonnage, 100);
+});

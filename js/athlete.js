@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -37,9 +37,9 @@ export function fmtSecs(n) {
   return n < 60 ? `${n} s` : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 }
 
-function targetText(set, measure, u) {
+function targetText(set, measure, u, loaded = true) {
   // A % of max shows as the % until the athlete has a max on file.
-  const w = store.showW(set.targetWeight ?? set.weight, u) || (set.targetPct != null ? `${set.targetPct}%` : null);
+  const w = !loaded ? null : store.showW(set.targetWeight ?? set.weight, u) || (set.targetPct != null ? `${set.targetPct}%` : null);
   if (measure === 'time') {
     const t = fmtSecs(set.targetSecs ?? set.secs);
     return w && t ? `${w} × ${t}` : t;
@@ -128,7 +128,7 @@ function entryCard(log, entry, i, label) {
   const eu = entry.unit || store.unit();
   const su = (s) => s.unit || eu;
   const measure = entry.measure || 'reps';
-  const loaded = ex.loaded !== false && measure !== 'none' && measure !== 'breaths';
+  const loaded = logsWeight(entry, ex);
   const amount = (s) => (measure === 'time' ? fmtSecs(s.secs) : `${s.reps ?? ''}`);
   const lastTxt = last && measure !== 'none' ? `Last time: ${last.sets.map((s) => s.weight ? `${store.showW(s.weight, eu)}×${amount(s)}` : amount(s)).join(', ')}` : '';
   // The box the athlete fills in: reps, breaths, seconds, or nothing for a check-off item.
@@ -142,7 +142,7 @@ function entryCard(log, entry, i, label) {
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
-      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s)))}</span>
+      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s), loaded))}</span>
       ${loaded ? `<div class="field wfield"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight, su(s)) ?? ''}" placeholder="${store.showW(s.targetWeight, su(s)) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight in ${su(s)}, set ${j + 1}"><button class="unit-btn" data-action="setUnit" data-i="${i}" data-j="${j}" aria-label="Weight unit for set ${j + 1}: ${su(s)}. Tap to switch">${su(s)}</button></div>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
@@ -154,7 +154,8 @@ function entryCard(log, entry, i, label) {
       <div class="entry-title"><h3>${esc(ex.name)}</h3>
         ${tags.length ? `<p class="tags">${esc(tags.join(' · '))}</p>` : ''}
         ${lastTxt ? `<button class="last" data-action="history" data-i="${i}" aria-label="${esc(lastTxt)}. See all past sets">${esc(lastTxt)} <b>· History ›</b></button>` : ''}</div>
-      <button class="chip" data-action="swap" data-i="${i}">Swap</button>
+      <div class="entry-acts"><button class="chip" data-action="editEntry" data-i="${i}" aria-label="Change how you log ${esc(ex.name)}">Edit</button>
+        <button class="chip" data-action="swap" data-i="${i}">Swap</button></div>
     </header>
     ${entry.note ? `<p class="coach-note">${esc(entry.note)}</p>` : ''}
     ${ex.video ? `<a class="link small" href="${esc(ex.video)}" target="_blank" rel="noopener">▶ Watch demo</a>` : ''}
@@ -231,7 +232,7 @@ export function session(root, { id, date, warm = false }) {
       if (s.done) {
         if (s.reps == null) s.reps = s.targetReps ?? null;
         if (s.secs == null) s.secs = s.targetSecs ?? null;
-        if (s.weight == null) s.weight = s.targetWeight ?? null;
+        if (s.weight == null && logsWeight(log.entries[el.dataset.i], store.get('exercises', log.entries[el.dataset.i].exerciseId))) s.weight = s.targetWeight ?? null;
         const row = el.closest('.set');
         for (const f of ['weight', 'reps', 'secs']) { const box = row.querySelector(`[data-k=${f}]`); if (box && s[f] != null) box.value = f === 'weight' ? store.showW(s[f], unitOf(el.dataset.i, el.dataset.j)) : s[f]; }
       }
@@ -283,6 +284,7 @@ export function session(root, { id, date, warm = false }) {
       location.hash = `#/athlete/${id}?d=${date}`;
     },
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
+    editEntry: (el) => editEntrySheet(log.entries[el.dataset.i], () => { persist(); rerender(); }),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addVideo: (el) => {
       if (!videosEnabled()) return toast('Videos need the online app, not the demo.');
@@ -312,7 +314,8 @@ export function session(root, { id, date, warm = false }) {
     },
     playVideo: (el) => videoSheet(el.dataset.path),
     addExercise: () => pickExerciseSheet((exId) => {
-      log.entries.push({ exerciseId: exId, unit: store.unit(), note: '', sets: [{ targetReps: null, targetWeight: null, reps: null, weight: null, done: false }], addedByAthlete: true });
+      const x = store.get('exercises', exId);
+      log.entries.push({ exerciseId: exId, ...(x?.measure ? { measure: x.measure } : {}), unit: store.unit(), note: '', sets: [{ targetReps: null, targetSecs: null, targetWeight: null, reps: null, secs: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
     }),
     switch: () => switchSheet(id, date, async (plan) => {
@@ -383,6 +386,45 @@ function historySheet(log, entry) {
       <ol class="hist-sets">${h.sets.map((s) => `<li>${esc(setText(s, h))}</li>`).join('')}</ol>
       ${h.note ? `<p class="muted small">${esc(h.note)}</p>` : ''}</li>`).join('')}</ol>`;
   sheet(`${ex.name} history`, html);
+}
+
+// Change how one exercise is logged in this workout: reps, time, breaths or a
+// plain check-off, and whether it gets a weight box. It only changes this
+// day's log; the coach's program and the exercise library stay as they are.
+const LOG_AS = [['reps', 'Reps'], ['time', 'Time'], ['breaths', 'Breaths'], ['none', 'Check off']];
+function editEntrySheet(entry, done) {
+  const ex = store.get('exercises', entry.exerciseId);
+  let m = entry.measure || 'reps';
+  let weight = logsWeight({ ...entry, measure: 'reps' }, ex);
+  const html = `<p class="muted">Only changes this workout. Your coach's program stays the same.</p>
+    <p class="sheet-label">Log it as</p>
+    <div class="seg" role="group" aria-label="Log it as">${LOG_AS.map(([v, label]) =>
+      `<button class="${m === v ? 'on' : ''}" data-m="${v}" aria-pressed="${m === v}">${label}</button>`).join('')}</div>
+    <label class="check-row edit-weight"><input type="checkbox" ${weight ? 'checked' : ''}> Log the weight I use</label>
+    <div class="ask-btns"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-save>Save</button></div>`;
+  sheet(ex?.name || 'Edit exercise', html, (w) => {
+    const box = w.querySelector('.edit-weight');
+    const sync = () => {
+      w.querySelectorAll('[data-m]').forEach((b) => { b.classList.toggle('on', b.dataset.m === m); b.setAttribute('aria-pressed', b.dataset.m === m); });
+      // Breathing drills and check-offs never take a weight.
+      box.hidden = m === 'none' || m === 'breaths';
+    };
+    sync();
+    w.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-m]');
+      if (b) { m = b.dataset.m; sync(); }
+      if (!e.target.closest('[data-save]')) return;
+      weight = box.querySelector('input').checked;
+      if (m === 'reps') delete entry.measure; else entry.measure = m;
+      if (weight === (ex?.loaded !== false)) delete entry.load; else entry.load = weight;
+      entry.athleteEdited = true;
+      const open = entry.sets.filter((s) => !s.done);
+      if (!logsWeight(entry, ex)) open.forEach((s) => { s.weight = null; });
+      // A check-off is one tap, so extra empty sets go.
+      if (m === 'none' && entry.sets.length > 1 && !entry.sets.some((s) => s.done)) entry.sets = entry.sets.slice(0, 1);
+      closeSheet(); done();
+    });
+  });
 }
 
 function swapSheet(log, i, done) {

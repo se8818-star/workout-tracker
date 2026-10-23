@@ -87,6 +87,14 @@ export function prescribedPct(item, week, block) {
 export const measureOf = (item) => item.measure || 'reps';
 export const isCount = (measure) => measure === 'reps' || measure === 'breaths';
 
+// Whether a logged exercise gets a weight box. The athlete can turn it on or
+// off for one workout (entry.load); otherwise the exercise decides.
+export function logsWeight(entry, ex) {
+  const m = measureOf(entry);
+  if (m === 'none' || m === 'breaths') return false;
+  return entry.load ?? ex?.loaded !== false;
+}
+
 export function prescribedSecs(item, week) {
   const prog = item.progression || {};
   const secs = item.secs || 0;
@@ -137,7 +145,7 @@ export function sessionEntries(s, unit) {
 }
 
 const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit;
-const untouchedEntry = (e) => !e.addedByAthlete && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
+const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
 
 // A day's log is made the first time the athlete opens it, but the coach can
 // still edit the block after that. Bring the block's current plan into the
@@ -154,7 +162,9 @@ export function refreshEntries(entries, fresh) {
     const f = fresh[k];
     if (untouchedEntry(e)) return { ...e, ...f };
     return {
-      ...e, note: f.note, tempo: f.tempo, group: f.group, measure: f.measure, unit: f.unit,
+      ...e, note: f.note, tempo: f.tempo, group: f.group, unit: f.unit,
+      // How the athlete chose to log it (reps, breaths, weight...) stays theirs.
+      measure: e.athleteEdited ? e.measure : f.measure,
       sets: e.sets.map((s, j) => {
         const t = f.sets[Math.min(j, f.sets.length - 1)];
         if (!t || s.done) return s;
@@ -183,7 +193,7 @@ export function sessionTotals(session, exercises, onlyDone = true) {
       t.sets += 1;
       t.reps += reps;
       t.setsByPattern[ex.pattern] = (t.setsByPattern[ex.pattern] || 0) + 1;
-      if (ex.loaded && w) {
+      if ((entry.load ?? ex.loaded) && w) {
         const ton = reps * w;
         t.tonnage += ton;
         t.tonnageByPattern[ex.pattern] = (t.tonnageByPattern[ex.pattern] || 0) + ton;

@@ -193,6 +193,7 @@ select.dd-native { display: none; }
 .entry { background: var(--card); border: var(--rule); padding: 14px 14px 8px; margin: 0 0 16px; }
 .entry.complete { border-color: var(--turf); box-shadow: 3px 3px 0 var(--turf); }
 .entry header { display: flex; gap: 12px; align-items: flex-start; }
+.entry-acts { display: flex; gap: 6px; flex-shrink: 0; }
 .order {
   flex-shrink: 0; min-width: 40px; height: 40px; padding: 0 6px; background: var(--ink); color: var(--paper);
   display: grid; place-items: center; font-family: var(--head); font-weight: 900; font-stretch: 65%; font-size: 1.4rem;
@@ -403,6 +404,16 @@ button.last b { color: var(--track); white-space: nowrap; }
 .ask-btns { display: flex; gap: 10px; margin-top: 18px; }
 .ask-btns .btn { flex: 1; padding: 12px; font-size: 1rem; }
 .ask-field { display: block; margin: 10px 0; }
+.sheet-label { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; margin: 14px 0 0; }
+.sheet-body .seg { display: flex; }
+.sheet-body .seg button { flex: 1; }
+.edit-weight { margin-top: 12px; }
+.edit-weight[hidden] { display: none; }
+.item-top .icon-btn { flex-shrink: 0; }
+.item-top .item-name { min-width: 72px; }
+.item-top .pill { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-measure { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; }
+.item-measure .link { margin-top: 10px; padding: 6px 0; }
 .ask-field span { display: block; font-family: var(--mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
 .pick { list-style: none; padding: 0; margin: 0; }
 .pick li + li button { border-top: var(--hair); }

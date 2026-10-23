@@ -212,6 +212,34 @@ function stepper(label, k, value, min, step = 1) {
 
 const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['breaths', 'Breaths'], ['none', 'No sets']];
 
+// Switch a program item to another measure, keeping its numbers sensible.
+function setMeasure(it, v) {
+  if (v === 'reps') delete it.measure; else it.measure = v;
+  if (v === 'time' && it.secs == null) it.secs = 30;
+  if (v === 'breaths' && it.reps == null) it.reps = 5;
+  if (!isCount(v) && it.reps == null) delete it.reps;
+  // Breathing drills carry no load.
+  if (v === 'breaths') clearLoad(it);
+  // A weekly rule only makes sense for the measure it was written for.
+  const pt = it.progression?.type;
+  if ((pt === 'add_reps' && !isCount(v)) || (pt === 'add_secs' && v !== 'time') || v === 'none'
+    || (v === 'breaths' && ['add_pct', 'add_weight'].includes(pt))) it.progression = undefined;
+}
+
+function clearLoad(it) {
+  delete it.pct; delete it.weight; delete it.maxFrom;
+  if (['add_pct', 'add_weight'].includes(it.progression?.type)) it.progression = undefined;
+}
+
+// A new program item starts the way its exercise is usually logged.
+function newItem(exId, warm) {
+  const it = warm ? { exerciseId: exId, warmup: true, sets: 1, reps: 10 } : { exerciseId: exId, sets: 3, reps: 8 };
+  const m = store.get('exercises', exId)?.measure;
+  if (m && m !== 'reps') setMeasure(it, m);
+  if (m === 'time') delete it.reps;
+  return it;
+}
+
 function itemRow(item, di, ii, ex, label) {
   const x = ex[item.exerciseId];
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
@@ -231,8 +259,9 @@ function itemRow(item, di, ii, ex, label) {
       <button class="icon-btn" data-action="itemDown" title="Move down" aria-label="Move down">↓</button>
       <button class="icon-btn" data-action="itemDel" title="Remove" aria-label="Remove">✕</button>
     </div>
-    <div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
+    <div class="item-measure"><div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
+      ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps">Edit exercise ✎</a>` : ''}</div>
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', item.sets, 1)}
       <span class="times" aria-hidden="true">×</span>
@@ -456,17 +485,7 @@ export function blockEditor(root, { id }, query) {
     measure: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
-      const v = el.dataset.v;
-      if (v === 'reps') delete it.measure; else it.measure = v;
-      if (v === 'time' && it.secs == null) it.secs = 30;
-      if (v === 'breaths' && it.reps == null) it.reps = 5;
-      if (!isCount(v) && it.reps == null) delete it.reps;
-      // Breathing drills carry no load.
-      if (v === 'breaths') { delete it.pct; delete it.weight; delete it.maxFrom; }
-      // A weekly rule only makes sense for the measure it was written for.
-      const pt = it.progression?.type;
-      if ((pt === 'add_reps' && !isCount(v)) || (pt === 'add_secs' && v !== 'time') || v === 'none'
-        || (v === 'breaths' && ['add_pct', 'add_weight'].includes(pt))) it.progression = undefined;
+      setMeasure(it, el.dataset.v);
       save();
     },
     itemPick: (el) => {
@@ -474,10 +493,7 @@ export function blockEditor(root, { id }, query) {
       const it = b.days[di].items[ii];
       pickExerciseSheet((exId) => {
         it.exerciseId = exId;
-        if (!store.get('exercises', exId)?.loaded) {
-          delete it.pct; delete it.weight; delete it.maxFrom;
-          if (['add_pct', 'add_weight'].includes(it.progression?.type)) it.progression = undefined;
-        }
+        if (!store.get('exercises', exId)?.loaded) clearLoad(it);
         save();
       }, { allowNew: true });
     },
@@ -488,7 +504,7 @@ export function blockEditor(root, { id }, query) {
         const a = b.days[di].items;
         // Warmup exercises stay together at the top of the day.
         const at = warm ? a.filter((x) => x.warmup).length : a.length;
-        a.splice(at, 0, warm ? { exerciseId: exId, warmup: true, sets: 1, reps: 10 } : { exerciseId: exId, sets: 3, reps: 8 });
+        a.splice(at, 0, newItem(exId, warm));
         save();
         root.querySelector(`.item[data-di="${di}"][data-ii="${at}"]`)?.scrollIntoView({ block: 'center' });
       }, { allowNew: true });
@@ -616,8 +632,20 @@ export function assign(root, _p, query) {
 
 // ---------- exercise library ----------
 
+const loggedAs = (e) => [e.loaded ? 'Weight' : '', { time: 'Time', breaths: 'Breaths', none: 'Check off' }[e.measure] || 'Reps'].filter(Boolean).join(' + ');
+
+// Program items (in this team's programs and saved warmups) that use an exercise.
+function itemsUsing(exId) {
+  const out = [];
+  for (const b of store.all('blocks')) for (const d of b.days) for (const it of d.items) if (it.exerciseId === exId) out.push({ b, it });
+  return out;
+}
+
 export function exercises(root, _p, query) {
   const editId = query.get('edit');
+  // Opened from the program editor: Save and Cancel go back there.
+  const back = (query.get('back') || '').startsWith('#/coach/') ? query.get('back') : '#/coach/exercises';
+  const uses = editId ? itemsUsing(editId) : [];
   const list = store.all('exercises').sort((a, b) => a.name.localeCompare(b.name));
   const x = editId ? (store.get('exercises', editId) || { id: '', name: '', pattern: 'other', body: 'full', loaded: true, alts: [] }) : null;
   const form = x ? `
@@ -626,20 +654,23 @@ export function exercises(root, _p, query) {
       <label class="field-row"><span>Name</span><input id="ex-name" value="${esc(x.name)}"></label>
       <label class="field-row"><span>Movement</span><select id="ex-pattern">${PATTERNS.map((p) => `<option value="${p}" ${x.pattern === p ? 'selected' : ''}>${PATTERN_LABEL[p]}</option>`).join('')}</select></label>
       <label class="field-row"><span>Body</span><select id="ex-body">${['lower', 'upper', 'full'].map((p) => `<option ${x.body === p ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
-      <label class="check-row"><input type="checkbox" id="ex-loaded" ${x.loaded ? 'checked' : ''}> Uses a weight (counts toward tonnage)</label>
+      <label class="check-row"><input type="checkbox" id="ex-loaded" ${x.loaded ? 'checked' : ''}> Uses a weight (athletes get a weight box; counts toward tonnage)</label>
+      <label class="field-row"><span>Logged as</span><select id="ex-measure">${MEASURES.map(([v, label]) => `<option value="${v}" ${(x.measure || 'reps') === v ? 'selected' : ''}>${v === 'none' ? 'Check off (no sets)' : label}</option>`).join('')}</select></label>
+      ${uses.length ? `<label class="check-row"><input type="checkbox" id="ex-apply"> Also change how it's logged in programs that use it (${uses.length} place${uses.length > 1 ? 's' : ''})</label>
+      <p class="muted small">Without this, only exercises you add from now on start this way. Athletes see changes on days they haven't started.</p>` : ''}
       <label class="field-row"><span>Plyo contacts per rep</span><input type="number" min="0" id="ex-contacts" value="${x.contactsPerRep ?? ''}" placeholder="blank if not a plyo"></label>
       <label class="field-row"><span>Plyo intensity</span><select id="ex-tier"><option value="">–</option>${Object.entries(PLYO_TIERS).map(([k, v]) => `<option value="${k}" ${String(x.plyoTier) === k ? 'selected' : ''}>${k}: ${v}</option>`).join('')}</select></label>
       <label class="field-row"><span>Sprint meters per rep</span><input type="number" min="0" id="ex-meters" value="${x.metersPerRep ?? ''}"></label>
       <label class="field-row"><span>Video link</span><input type="url" id="ex-video" value="${esc(x.video || '')}" placeholder="https://"></label>
       <fieldset><legend>Swap options (same movement)</legend><div class="checks tall">${list.filter((e) => e.id !== x.id).map((e) => `<label class="check-row"><input type="checkbox" name="alt" value="${e.id}" ${x.alts?.includes(e.id) ? 'checked' : ''}> ${esc(e.name)}</label>`).join('')}</div></fieldset>
-      <div class="row gap"><button class="btn" data-action="saveEx">Save</button><a class="btn ghost" href="#/coach/exercises">Cancel</a></div>
+      <div class="row gap"><button class="btn" data-action="saveEx">Save</button><a class="btn ghost" href="${esc(back)}">Cancel</a></div>
     </section>` : '';
   root.innerHTML = `
     <header class="page-head"><h1>Exercise library</h1><p class="muted">${list.length} exercises. Plyo contacts and movement type drive the weekly numbers.</p></header>
     ${form}
     <div class="row gap"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises"><a class="btn" href="#/coach/exercises?edit=new">+ New</a></div>
-    <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody>
-      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a></td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
+    <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody>
+      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a></td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
     </tbody></table></div>`;
   const q = $('#ex-q', root);
   q.addEventListener('input', () => root.querySelectorAll('tr[data-name]').forEach((r) => { r.hidden = !r.dataset.name.includes(q.value.toLowerCase()); }));
@@ -652,6 +683,7 @@ export function exercises(root, _p, query) {
       const obj = {
         ...x, id: x.id || store.uid('ex'), name, pattern: v('#ex-pattern'), body: v('#ex-body'),
         loaded: $('#ex-loaded', root).checked,
+        measure: v('#ex-measure') === 'reps' ? undefined : v('#ex-measure'),
         contactsPerRep: v('#ex-contacts') ? Number(v('#ex-contacts')) : undefined,
         plyoTier: v('#ex-tier') ? Number(v('#ex-tier')) : undefined,
         metersPerRep: v('#ex-meters') ? Number(v('#ex-meters')) : undefined,
@@ -659,8 +691,17 @@ export function exercises(root, _p, query) {
         alts: [...root.querySelectorAll('input[name=alt]:checked')].map((c) => c.value),
       };
       store.put('exercises', obj);
-      toast('Saved');
-      location.hash = '#/coach/exercises';
+      // Bring programs in line: the new measure, and no load once it stops using a weight.
+      const changed = new Set();
+      if ($('#ex-apply', root)?.checked) {
+        for (const { b, it } of uses) {
+          if (measureOf(it) !== (obj.measure || 'reps')) { setMeasure(it, obj.measure || 'reps'); changed.add(b); }
+          if (!obj.loaded && (it.pct != null || it.weight != null)) { clearLoad(it); changed.add(b); }
+        }
+        for (const b of changed) store.put('blocks', b);
+      }
+      toast(changed.size ? `Saved. Updated ${changed.size} program${changed.size > 1 ? 's' : ''}.` : 'Saved');
+      location.hash = back;
     },
   });
 }
