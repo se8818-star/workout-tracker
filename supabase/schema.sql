@@ -69,6 +69,38 @@ drop trigger if exists records_keep_finished on records;
 create trigger records_keep_finished before update on records
   for each row execute function keep_finished_log();
 
+-- Safety net: before a record is replaced, its previous version is copied to
+-- records_history and kept 30 days, so a lost workout can be restored from the
+-- SQL editor. The app never reads it (no policies, so only you can).
+create table if not exists records_history (
+  team_id uuid not null,
+  kind text not null,
+  id text not null,
+  data jsonb not null,
+  deleted boolean not null,
+  updated_at timestamptz not null,
+  updated_by uuid,
+  replaced_at timestamptz not null default now()
+);
+create index if not exists records_history_lookup on records_history (team_id, kind, id, replaced_at);
+create index if not exists records_history_age on records_history (replaced_at);
+alter table records_history enable row level security;
+
+create or replace function save_record_history() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if old.data is distinct from new.data or old.deleted is distinct from new.deleted then
+    insert into records_history (team_id, kind, id, data, deleted, updated_at, updated_by)
+      values (old.team_id, old.kind, old.id, old.data, old.deleted, old.updated_at, old.updated_by);
+  end if;
+  delete from records_history where replaced_at < now() - interval '30 days';
+  return null;
+end $$;
+
+drop trigger if exists records_history_save on records;
+create trigger records_history_save after update on records
+  for each row execute function save_record_history();
+
 alter table teams enable row level security;
 alter table members enable row level security;
 alter table records enable row level security;
