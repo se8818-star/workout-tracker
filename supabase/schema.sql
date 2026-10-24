@@ -277,3 +277,42 @@ create policy form_videos_add on storage.objects for insert to authenticated
 drop policy if exists form_videos_delete on storage.objects;
 create policy form_videos_delete on storage.objects for delete to authenticated
   using (bucket_id = 'form-videos' and public.can_use_video(name));
+
+-- A workout never loses its link to a form video that's still in Storage.
+-- If a device uploads an older copy of the log without the clip (or rebuilds
+-- the sets), the link goes back on the same exercise and set. When an athlete
+-- removes a clip the app deletes the file first, so that removal sticks.
+create or replace function keep_log_videos() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  i int; j int; k int; s int; p text; v jsonb; ex text;
+begin
+  if new.kind <> 'logs' or new.deleted or old.deleted
+     or coalesce(jsonb_typeof(old.data->'entries'), '') <> 'array' or coalesce(jsonb_typeof(new.data->'entries'), '') <> 'array' then
+    return new;
+  end if;
+  for i in 0 .. jsonb_array_length(old.data->'entries') - 1 loop
+    ex := old.data->'entries'->i->>'exerciseId';
+    for j in 0 .. coalesce(jsonb_array_length(old.data->'entries'->i->'sets'), 0) - 1 loop
+      v := old.data->'entries'->i->'sets'->j->'video';
+      p := v->>'path';
+      continue when p is null or position(p in new.data::text) > 0;
+      continue when not exists (select 1 from storage.objects o where o.bucket_id = 'form-videos' and o.name = p);
+      -- Same exercise in the new copy, else the same position.
+      k := null;
+      for s in 0 .. jsonb_array_length(new.data->'entries') - 1 loop
+        if new.data->'entries'->s->>'exerciseId' = ex then k := s; exit; end if;
+      end loop;
+      if k is null and i < jsonb_array_length(new.data->'entries') then k := i; end if;
+      continue when k is null or coalesce(jsonb_array_length(new.data->'entries'->k->'sets'), 0) = 0;
+      s := least(j, jsonb_array_length(new.data->'entries'->k->'sets') - 1);
+      continue when new.data->'entries'->k->'sets'->s ? 'video';
+      new.data := jsonb_set(new.data, array['entries', k::text, 'sets', s::text, 'video'], v);
+    end loop;
+  end loop;
+  return new;
+end $$;
+
+drop trigger if exists records_keep_videos on records;
+create trigger records_keep_videos before update on records
+  for each row execute function keep_log_videos();
