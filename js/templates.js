@@ -142,6 +142,41 @@ const FALL_2026_BLOCK = {
   ],
 };
 
+// Second sheet: one full body day of three supersets. Every set aims for
+// 10-15 reps; the sets themselves grow by week (week 1 one set, weeks 2-3
+// two, week 4 on three), which the athlete adds with "+ Set".
+const CHRISTINA_FB_EXERCISES = [
+  X('db-bench', 'Dumbbell bench press', 'push', 'upper'),
+  X('back-squat', 'Back squat', 'squat', 'lower'),
+  X('chin-up', 'Chin-up', 'pull', 'upper', false),
+  X('rdl', 'Romanian deadlift', 'hinge', 'lower'),
+  X('arnold-press', 'Arnold shoulder press', 'push', 'upper'),
+  X('copenhagen-knee', 'Copenhagen plank (from knee)', 'core', 'lower', false),
+];
+
+const SETS_10_15 = 'Week 1: 1 working set. Weeks 2-3: 2 sets. Week 4 on: 3 sets (tap + Set).';
+const RULES_10_15 = 'Do 2-3 warm-up sets first. Fail before 10 reps: too heavy, count the set and drop the weight. 15 reps easily: call it a warm-up and go heavier. Hit 15 at a weight: add weight next week.';
+const ss = (group, exerciseId, demo, opts) => ({ ...it(exerciseId, 1, 10, { range: '10-15', ...opts, note: [opts.note, `Demo: ${demo}`].filter(Boolean).join('\n') }), group });
+
+const CHRISTINA_FB_BLOCK = {
+  name: 'Christina FB',
+  weeks: 8,
+  deloadWeek: null,
+  days: [
+    {
+      name: 'Full body',
+      items: [
+        ss('A', 'db-bench', 'https://youtu.be/JN9DVjlafcg', { rir: 1, note: `${SETS_10_15}\n${RULES_10_15}` }),
+        ss('A', 'back-squat', 'https://youtube.com/shorts/gjMYET5fT5k', { rir: 1 }),
+        ss('B', 'chin-up', 'https://youtube.com/shorts/Szy41PBWImo', { note: 'As many reps as possible' }),
+        ss('B', 'rdl', 'https://youtube.com/shorts/5swaQQ3pWh8', { rir: 1 }),
+        ss('C', 'arnold-press', 'https://youtube.com/shorts/FeiPuPtqnBg', { rir: 1 }),
+        ss('C', 'copenhagen-knee', 'https://youtube.com/shorts/imJBlGadATo', { note: 'As many reps as possible' }),
+      ],
+    },
+  ],
+};
+
 export const TEMPLATES = [
   {
     id: 'fall-2026',
@@ -157,5 +192,12 @@ export const TEMPLATES = [
     about: '12 exercises from the Warmup tab of the Fall 2026 sheet.',
     block: { name: 'Fall 2026 warmup', kind: 'warmup', weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items: warm() }] },
     exercises: FALL_2026_EXERCISES.filter((e) => warm().some((x) => x.exerciseId === e.id)),
+  },
+  {
+    id: 'christina-fb',
+    name: 'Christina FB',
+    about: '1 day, 3 supersets (bench + squat, chin-up + RDL, Arnold press + Copenhagen), 10-15 reps at 1 RIR, adding a set in weeks 2 and 4.',
+    block: CHRISTINA_FB_BLOCK,
+    exercises: CHRISTINA_FB_EXERCISES,
   },
 ];
