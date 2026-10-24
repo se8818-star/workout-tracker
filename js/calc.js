@@ -198,7 +198,8 @@ export function sessionEntries(s, unit) {
   })) }));
 }
 
-const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit;
+// A set with a form video counts as touched, so a rebuild never drops the clip.
+const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit && !s.video;
 export const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
 
 // A day's log is made the first time the athlete opens it, but the coach can

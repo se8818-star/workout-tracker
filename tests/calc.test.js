@@ -182,6 +182,17 @@ test('coach edits after a day was opened reach the athlete without touching logg
   assert.equal(b[1].sets[1].targetWeight, 50);
 });
 
+test('a form video on an otherwise empty set survives a block refresh', () => {
+  const block = { deloadWeek: null, days: [{ name: 'A', items: [{ exerciseId: 'x', sets: 2, reps: 5 }] }] };
+  const before = calc.sessionEntries(calc.buildSession(block, 0, 0, { maxes: {} }), 'lb');
+  before[0].sets[1].video = { path: 't/a/clip.mp4', at: '2026-10-22T20:05:58Z', secs: null };
+  const log = { entries: before };
+  assert.equal(calc.untouchedLog(log), false);
+  block.days[0].items[0].reps = 8;
+  const [e] = calc.refreshEntries(before, calc.sessionEntries(calc.buildSession(block, 0, 0, { maxes: {} }), 'lb'));
+  assert.equal(e.sets[1].video.path, 't/a/clip.mp4');
+});
+
 test('weight box follows the exercise unless the athlete changed it', () => {
   assert.equal(calc.logsWeight({ exerciseId: 'squat' }, ex.squat), true);
   assert.equal(calc.logsWeight({ exerciseId: 'box' }, ex.box), false);
