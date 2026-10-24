@@ -45,7 +45,17 @@ export function isDeload(block, week) {
   return block.deloadWeek != null && block.deloadWeek === week;
 }
 
+// A number the coach set for one week (item.byWeek[week].sets, .reps, .secs,
+// .weight or .pct). It is used exactly as written: the weekly rule and the
+// deload cut don't change it. Week 1 (0) is the item itself.
+export function weekOverride(item, week, k) {
+  const v = item.byWeek?.[week]?.[k];
+  return v == null ? null : v;
+}
+
 export function prescribedSets(item, block, week) {
+  const o = weekOverride(item, week, 'sets');
+  if (o != null) return Math.max(1, o);
   const sets = item.sets || 1;
   return isDeload(block, week) ? Math.max(1, Math.ceil(sets / 2)) : sets;
 }
@@ -58,10 +68,14 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
   if (item.pct != null) {
     const max = athlete?.maxes?.[item.maxFrom || item.exerciseId];
     if (!max) return null;
+    const o = weekOverride(item, week, 'pct');
+    if (o != null) return roundTo(max * o / 100, stepFor(rounding, item));
     let pct = item.pct;
     if (prog.type === 'add_pct') pct += (prog.step || 0) * week;
     weight = max * pct / 100;
   } else if (item.weight != null) {
+    const o = weekOverride(item, week, 'weight');
+    if (o != null) return roundTo(o, stepFor(rounding, item));
     weight = item.weight;
     if (prog.type === 'add_weight') weight += (prog.step || 0) * week;
   } else {
@@ -75,6 +89,8 @@ export function prescribedWeight(item, athlete, week, block, rounding = 5) {
 // file to turn it into a weight.
 export function prescribedPct(item, week, block) {
   if (item.pct == null) return null;
+  const o = weekOverride(item, week, 'pct');
+  if (o != null) return o;
   const prog = item.progression || {};
   let pct = item.pct + (prog.type === 'add_pct' ? (prog.step || 0) * week : 0);
   if (isDeload(block, week)) pct *= 0.9;
@@ -96,12 +112,16 @@ export function logsWeight(entry, ex) {
 }
 
 export function prescribedSecs(item, week) {
+  const o = weekOverride(item, week, 'secs');
+  if (o != null) return o;
   const prog = item.progression || {};
   const secs = item.secs || 0;
   return prog.type === 'add_secs' ? secs + (prog.step || 0) * week : secs;
 }
 
 export function prescribedReps(item, week) {
+  const o = weekOverride(item, week, 'reps');
+  if (o != null) return o;
   const prog = item.progression || {};
   const reps = item.reps || 0;
   return prog.type === 'add_reps' ? reps + (prog.step || 0) * week : reps;
