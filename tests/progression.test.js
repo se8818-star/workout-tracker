@@ -200,6 +200,8 @@ test('changes run together with commas still split by their weeks', () => {
   const r = applyProgression(b, p.rules);
   assert.deepEqual(sets(r.block, 0, 0), [1, 2, 2, 3, 3, 3, 3, 4]);
   assert.deepEqual(sets(r.block, 1, 0), [3, 2, 2, 3, 3, 3, 3, 4]);
+  const lines = parseProgression('weeks 2-3: 2 sets of everything\nweeks 4-7: 3 sets of everything\nweeks 8-12: 4 sets of everything', b, NAMES_EX);
+  assert.deepEqual(describeRules(lines.rules), ['Weeks 2–3: sets at 2.', 'Weeks 4–7: sets at 3.', 'Weeks 8–12: sets at 4.']);
   assert.equal(parseProgression('weeks 2-3: 2 sets and weeks 4-7: 3 sets then week 8 on: 4 sets', b, NAMES_EX).rules.length, 3);
   assert.match(parseProgression('2 sets, 3 sets', b, NAMES_EX).error, /more than one number for sets/);
 });

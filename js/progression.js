@@ -28,7 +28,7 @@ function normalize(text) {
     .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty)\b/g, (w) => WORDS[w])
     .replace(/\b(a|an)\s+(?=(more\s+|extra\s+)?(reps?|sets?|breaths?|sec|second|lb|pound|kg|kilo|percent))/g, '1 ')
     .replace(/=+|==/g, ' = ')
-    .replace(/\s+/g, ' ');
+    .replace(/[^\S\n]+/g, ' ');
 }
 
 // One change: "add 1 rep", "increase weight by 10", "reset reps to 10", "+5 lb".
