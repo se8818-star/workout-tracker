@@ -213,7 +213,12 @@ export function ruleFor(rule, di, ii, item) {
 export function parseProgression(text, block = null, exercises = null) {
   const ctx = namesIn(block, exercises);
   const rules = [];
-  const sentences = normalize(text).split(/\.(?!\d)|;|\n|!/).map((x) => x.trim()).filter(Boolean);
+  // A comma (or "and") before a new set of weeks starts a new change:
+  // "weeks 2-3: 2 sets, weeks 4-7: 3 sets".
+  const sentences = normalize(text)
+    .replace(/\b(?:of|for|on|to)?\s*(?:everything|every exercise|all (?:the )?exercises|all of them|the whole program|the whole thing)\b/g, ' ')
+    .split(/\.(?!\d)|;|\n|!|(?:,|\band\b|\bthen\b)\s*(?:and\s+)?(?:then\s+)?(?=(?:in |from |for |on |during |starting |after )?(?:weeks?|wks?) \d)/)
+    .map((x) => x.trim()).filter(Boolean);
   if (!sentences.length) return { rules, error: 'Write what should change, e.g. "Add 1 rep per week".' };
   for (const raw of sentences) {
     const s = ` ${raw} `;
@@ -239,6 +244,8 @@ export function parseProgression(text, block = null, exercises = null) {
     const [main, cond] = mainUntil.split(/\b(?:until|till|up to|as long as|while)\b/);
     const actions = parseActions(main);
     if (!actions) return { rules, error: `I couldn't read "${raw.trim()}". Try "Add 1 rep per week" or "Increase weight by 5 lb every 2 weeks".` };
+    const twice = actions.find((a, i) => actions.findIndex((b) => b.field === a.field && b.op === 'set') !== i && a.op === 'set');
+    if (twice) return { rules, error: `"${raw.trim()}" has more than one number for ${NAMES[twice.field]}. Put each change on its own line.` };
     const rule = { every, actions, ...scope };
     if (cond) {
       rule.until = parseCondition(cond);

@@ -191,3 +191,15 @@ test('a named week is a one-off; the weeks after go back', () => {
   const both = parseProgression('add 1 set starting week 3 for chin-ups and the bench', b, NAMES_EX);
   assert.deepEqual(both.rules[0].targets.labels, ['Chin-up', 'Dumbbell bench press']);
 });
+
+test('changes run together with commas still split by their weeks', () => {
+  const b = named();
+  const p = parseProgression('weeks 2-3: 2 sets of everything, weeks 4-7: 3 sets of everything, weeks 8-12: 4 sets of everything', b, NAMES_EX);
+  assert.equal(p.error, null);
+  assert.deepEqual(describeRules(p.rules), ['Weeks 2–3: sets at 2.', 'Weeks 4–7: sets at 3.', 'Weeks 8–12: sets at 4.']);
+  const r = applyProgression(b, p.rules);
+  assert.deepEqual(sets(r.block, 0, 0), [1, 2, 2, 3, 3, 3, 3, 4]);
+  assert.deepEqual(sets(r.block, 1, 0), [3, 2, 2, 3, 3, 3, 3, 4]);
+  assert.equal(parseProgression('weeks 2-3: 2 sets and weeks 4-7: 3 sets then week 8 on: 4 sets', b, NAMES_EX).rules.length, 3);
+  assert.match(parseProgression('2 sets, 3 sets', b, NAMES_EX).error, /more than one number for sets/);
+});
