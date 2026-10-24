@@ -1,11 +1,12 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, sheet, closeSheet, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
+import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
 import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled } from './sync.js';
 
 const today = () => toISO(new Date());
@@ -209,10 +210,10 @@ function findExercise(name) {
     || all.find((x) => x.name.toLowerCase().includes(n));
 }
 
-// A number with − / + buttons either side, for sets and reps.
 // A number with − / + buttons either side, for sets, reps and seconds.
-function stepper(label, k, value, min, step = 1) {
-  return `<div class="stepper"><span>${label}</span>
+// `own` marks a number set for this week only.
+function stepper(label, k, value, min, step = 1, own = false) {
+  return `<div class="stepper ${own ? 'wk-own' : ''}"><span>${label}</span>
     <div class="stepper-row"><button class="step-btn" data-action="step" data-k="${k}" data-d="${-step}" aria-label="Less ${label.toLowerCase()}">−</button>
     <input type="number" inputmode="numeric" min="${min}" step="${step}" value="${value ?? ''}" data-action="itemField" data-k="${k}" aria-label="${label}">
     <button class="step-btn" data-action="step" data-k="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
@@ -248,8 +249,81 @@ function newItem(exId, warm) {
   return it;
 }
 
-function itemRow(item, di, ii, ex, label) {
+// The numbers that change week to week. Week 1 is the item itself; later
+// weeks can override them in item.byWeek.
+const WEEK_KEYS = ['sets', 'reps', 'secs', 'pct', 'weight'];
+const hasOwn = (item, week) => WEEK_KEYS.some((k) => weekOverride(item, week, k) != null);
+
+// Sets an item's number for one week. A value that matches what the weekly
+// rule would give anyway isn't kept, so later rule changes still reach it.
+function setWeekValue(it, b, week, k, v) {
+  it.byWeek = it.byWeek || {};
+  const wk = { ...it.byWeek[week] };
+  delete wk[k];
+  it.byWeek[week] = wk;
+  const ruled = { sets: () => prescribedSets(it, b, week), reps: () => prescribedReps(it, week), secs: () => prescribedSecs(it, week) }[k];
+  if (v != null && !(ruled && ruled() === v)) wk[k] = v;
+  if (!Object.keys(wk).length) delete it.byWeek[week];
+  if (!Object.keys(it.byWeek).length) delete it.byWeek;
+}
+
+// What an item shows on a week tab: that week's numbers, rule and deload included.
+function weekNumbers(item, b, week) {
+  if (!week || item.warmup) return { sets: item.sets, reps: item.reps, secs: item.secs, pct: item.pct, weight: item.weight, own: {} };
+  const own = Object.fromEntries(WEEK_KEYS.map((k) => [k, weekOverride(item, week, k) != null]));
+  return {
+    sets: prescribedSets(item, b, week), reps: prescribedReps(item, week), secs: prescribedSecs(item, week),
+    pct: prescribedPct(item, week, b), weight: item.weight != null ? prescribedWeight(item, null, week, b, store.roundStep()) : null, own,
+  };
+}
+
+function weekNote(item, b, wk) {
+  return hasOwn(item, wk) ? `<b>Week ${wk + 1} has its own numbers.</b> <button class="link" data-action="weekReset">Reset</button>`
+    : `Week ${wk + 1}: from week 1${item.progression ? ' and the weekly rule' : ''}${b.deloadWeek === wk ? ', deload' : ''}. Change a number to set it for this week only.`;
+}
+
+// One cell of the progression preview: "3×10 · 135 lb".
+function weekCell(item, b, w) {
+  const n = weekNumbers(item, b, w);
+  const m = measureOf(item);
+  if (m === 'none') return '✓';
+  let t = `${n.sets}×${m === 'time' ? `${n.secs}s` : n.reps}`;
+  if (item.pct != null) t += ` · ${n.pct}%`;
+  else if (item.weight != null) t += ` · ${store.showW(n.weight, item.unit || store.unit())} ${item.unit || store.unit()}`;
+  return t;
+}
+
+// Reads the coach's words, shows every week of what would change, and applies it on OK.
+function progressionSheet(b, text, scope, done) {
+  const p = parseProgression(text);
+  if (p.error) return toast(p.error);
+  const days = scope === '' ? null : [Number(scope)];
+  const r = applyProgression(b, p.rules, days);
+  const ex = store.exercisesById();
+  const name = (di, ii) => esc(ex[b.days[di].items[ii].exerciseId]?.name || b.days[di].items[ii].exerciseId);
+  const weeks = Array.from({ length: r.block.weeks }, (_, w) => w);
+  const html = `<div class="prog-read"><span class="kicker">I read this as</span><ul>${describeRules(p.rules).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>
+    ${r.changed.length ? `<div class="prog-table-wrap"><table class="prog-table"><thead><tr><th>Exercise</th>${weeks.map((w) => `<th>Wk ${w + 1}${r.block.deloadWeek === w ? ' D' : ''}</th>`).join('')}</tr></thead>
+      <tbody>${r.changed.map(({ di, ii }) => `<tr><th>${name(di, ii)}${b.days.length > 1 ? `<small>${esc(b.days[di].name)}</small>` : ''}</th>${weeks.map((w) => `<td>${weekCell(r.block.days[di].items[ii], r.block, w)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+      : '<p class="muted">None of the exercises fit this. Check that they use reps, time or a weight that matches.</p>'}
+    ${r.skipped.length ? `<p class="muted small">Left as they are (the change doesn't fit them, e.g. no weight set or timed): ${r.skipped.map(({ di, ii }) => name(di, ii)).join(', ')}.</p>` : ''}
+    ${r.replaced.length ? `<p class="muted small">This replaces the "each week" rule on ${r.replaced.map(({ di, ii }) => name(di, ii)).join(', ')}.</p>` : ''}
+    ${r.block.deloadWeek != null ? '<p class="muted small">The deload week gets half the sets and 10% less load, and the progression picks up again after it.</p>' : ''}
+    <div class="ask-btns"><button class="btn ghost" data-close>Cancel</button>${r.changed.length ? `<button class="btn" data-ok>Apply to ${r.changed.length} exercise${r.changed.length > 1 ? 's' : ''}</button>` : ''}</div>`;
+  const wrap = sheet('Preview every week', html);
+  wrap.classList.add('prog-sheet');
+  wrap.querySelector('[data-ok]')?.addEventListener('click', () => {
+    b.days = r.block.days;
+    closeSheet();
+    done();
+    toast('Weeks updated');
+  });
+}
+
+function itemRow(item, di, ii, ex, label, b = null, week = 0) {
   const x = ex[item.exerciseId];
+  const wk = week && !item.warmup ? week : 0;
+  const nums = weekNumbers(item, b, wk);
   const loadType = item.pct != null ? 'pct' : item.weight != null ? 'weight' : 'none';
   const prog = item.progression || { type: 'none' };
   const measure = measureOf(item);
@@ -271,17 +345,18 @@ function itemRow(item, di, ii, ex, label) {
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
       ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps">Edit exercise ✎</a>` : ''}</div>
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
-      ${stepper('Sets', 'sets', item.sets, 1)}
+      ${stepper('Sets', 'sets', nums.sets, 1, 1, nums.own.sets)}
       <span class="times" aria-hidden="true">×</span>
-      ${measure === 'time' ? stepper('Seconds', 'secs', item.secs, 0, 5) : stepper(measure === 'breaths' ? 'Breaths' : 'Reps', 'reps', item.reps, 0)}
+      ${measure === 'time' ? stepper('Seconds', 'secs', nums.secs, 0, 5, nums.own.secs) : stepper(measure === 'breaths' ? 'Breaths' : 'Reps', 'reps', nums.reps, 0, 1, nums.own.reps)}
     </div>`}
+    ${wk ? `<p class="wk-note small">${weekNote(item, b, wk)}</p>` : ''}
     ${x && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
       <label>Load<select data-action="loadType"><option value="none" ${loadType === 'none' ? 'selected' : ''}>None</option><option value="pct" ${loadType === 'pct' ? 'selected' : ''}>% of max</option><option value="weight" ${loadType === 'weight' ? 'selected' : ''}>Fixed weight</option></select></label>
       <div class="unit-field"><span>Unit</span><div class="seg unit-seg" role="group" aria-label="Weight unit">${['lb', 'kg'].map((v) =>
         `<button class="${iu === v ? 'on' : ''}" data-action="itemUnit" data-v="${v}" aria-pressed="${iu === v}">${v}</button>`).join('')}</div></div>
-      ${loadType === 'pct' ? `<label>%<input type="number" step="0.5" value="${item.pct}" data-action="itemField" data-k="pct"></label>
+      ${loadType === 'pct' ? `<label class="${nums.own.pct ? 'wk-own' : ''}">%<input type="number" step="0.5" value="${nums.pct}" data-action="itemField" data-k="pct"></label>
         <label>Max from<select data-action="itemField" data-k="maxFrom"><option value="">${esc(x.name)}</option>${loadedEx.filter((e) => e.id !== item.exerciseId).map((e) => `<option value="${e.id}" ${item.maxFrom === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>` : ''}
-      ${loadType === 'weight' ? `<label>${iu}<input type="number" step="any" value="${store.showW(item.weight, iu)}" data-action="itemField" data-k="weight"></label>` : ''}
+      ${loadType === 'weight' ? `<label class="${nums.own.weight ? 'wk-own' : ''}">${iu}<input type="number" step="any" value="${store.showW(nums.weight, iu)}" data-action="itemField" data-k="weight"></label>` : ''}
     </div>` : ''}
     <div class="item-notes">
       <label>Tempo<input type="text" placeholder="e.g. 3-1-1-0" value="${esc(item.tempo || '')}" data-action="itemField" data-k="tempo"></label>
@@ -331,6 +406,7 @@ export function blockEditor(root, { id }, query) {
   let stamped = false;
   for (const d of b.days) for (const it of d.items) if (!it.unit) { it.unit = store.unit(); stamped = true; }
   if (stamped) store.put('blocks', b);
+  const weekHasOwn = (w) => b.days.some((d) => d.items.some((it) => !it.warmup && hasOwn(it, w)));
   const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
   const onIt = [...new Set(store.all('assignments').filter((g) => g.blockId === id).map((g) => store.get('athletes', g.athleteId)?.name).filter(Boolean))].sort();
   const usedBy = onIt.length ? `<p class="assigned-note small">On this ${isWarmup(b) ? 'warmup' : 'program'}: <b>${esc(onIt.join(', '))}</b>. Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Edit next to the program on their page.</p>` : '';
@@ -359,7 +435,7 @@ export function blockEditor(root, { id }, query) {
         </div>
         <div class="sec">
           <h4>Workout</h4>
-          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length)))).join('')}
+          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length), b, week))).join('')}
         </div>
         <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
         <details class="quick-wrap"><summary>Or type a list</summary>
@@ -386,9 +462,21 @@ export function blockEditor(root, { id }, query) {
     <section class="card row gap wrap">
       <label class="field-row"><span>Weeks</span><input type="number" min="1" max="52" value="${b.weeks}" data-action="weeks"></label>
       <label class="field-row"><span>Deload week</span><select data-action="deload"><option value="">None</option>${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${b.deloadWeek === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
-      <label class="field-row"><span>Preview week</span><select data-action="previewWeek">${Array.from({ length: b.weeks }, (_, i) => `<option value="${i}" ${week === i ? 'selected' : ''}>Week ${i + 1}</option>`).join('')}</select></label>
     </section>
-    <p class="muted small">Write week 1. The "each week" rules fill in the later weeks; the deload week halves sets and drops load 10%. <span id="week-tot">${weekLine(weekTot)}</span></p>
+    <nav class="day-tabs week-tabs" aria-label="Weeks">
+      ${Array.from({ length: b.weeks }, (_, w) => `<button class="day-tab ${w === week ? 'on' : ''} ${w && weekHasOwn(w) ? 'own' : ''}" data-action="pickWeek" data-w="${w}" aria-pressed="${w === week}">Wk ${w + 1}${b.deloadWeek === w ? ' · D' : ''}</button>`).join('')}
+    </nav>
+    <p class="muted small">${week ? `<b>Week ${week + 1}.</b> Sets, reps and weight you change here are for this week only (marked red). Exercises, notes and the order are the same every week.` : 'Week 1 is the starting point. The "each week" rules fill in the later weeks, and the deload week halves sets and drops load 10%. Tap a week to change its numbers.'} <span id="week-tot">${weekLine(weekTot)}</span></p>
+    <details class="card prog-card" ${query.get('prog') ? 'open' : ''}><summary>Change every week at once</summary>
+      <p class="muted small">Describe the progression in your own words. You'll see every week before anything changes. Warmups are left alone.</p>
+      <textarea id="prog-text" rows="3" placeholder="Increase reps by 1 per week until reps = 15, then reset reps to 10 and increase weight by 10."></textarea>
+      <div class="row gap wrap prog-row">
+        <select id="prog-scope" aria-label="Which days"><option value="">Whole program</option>${b.days.map((d, di) => `<option value="${di}">Only ${esc(d.name || `Day ${di + 1}`)}</option>`).join('')}</select>
+        <button class="btn" data-action="progPreview">Preview</button>
+        ${b.days.some((d) => d.items.some((it) => it.byWeek)) ? '<button class="chip" data-action="progClear">Clear week changes</button>' : ''}
+      </div>
+      <p class="muted small">Examples: "Add 1 rep per week up to 12 reps". "Add 5 lb each week". "Add a set every 2 weeks". "Add 2.5% per week". Weights without lb or kg use each exercise's own unit.</p>
+    </details>
     <nav class="day-tabs" aria-label="Days">
       ${b.days.map((d, di) => `<button class="day-tab ${di === day ? 'on' : ''} ${di === other ? 'side' : ''}" data-action="pickDay" data-di="${di}" aria-pressed="${di === day}">${esc(d.name || `Day ${di + 1}`)}</button>`).join('')}
       <button class="day-tab add" data-action="addDay">+ Day</button>
@@ -398,6 +486,9 @@ export function blockEditor(root, { id }, query) {
     <div class="day-cols ${other != null ? 'two' : ''}">${b.days.length ? [day, other].filter((di) => di != null).map(dayCard).join('') : '<p class="empty">No days yet. Tap "+ Day".</p>'}</div>
     <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this block</a>`;
 
+  // Keep the open week's tab in sight on long programs.
+  const wt = $('.week-tabs', root), on = wt?.querySelector('.on');
+  if (on && on.offsetLeft + on.offsetWidth > wt.clientWidth) wt.scrollLeft = on.offsetLeft - wt.clientWidth / 2 + on.offsetWidth / 2;
   // Typing in a field only saves and refreshes the totals; a full redraw would
   // swallow the next tap. Structural changes (add/move/remove) redraw, keeping focus.
   const refreshTotals = () => {
@@ -421,12 +512,27 @@ export function blockEditor(root, { id }, query) {
   };
   const itemOf = (el) => { const r = el.closest('.item'); return { di: Number(r.dataset.di), ii: Number(r.dataset.ii) }; };
   const num = (v) => (v === '' ? null : Number(v));
+  // Show which numbers are this week's own without a redraw.
+  const markOwn = (el, it) => {
+    const box = el.closest('.stepper, label');
+    box?.classList.toggle('wk-own', weekOverride(it, week, el.dataset.k) != null);
+    const tab = root.querySelector(`.week-tabs [data-w="${week}"]`); tab?.classList.toggle('own', weekHasOwn(week));
+    const note = el.closest('.item')?.querySelector('.wk-note'); if (note) note.innerHTML = weekNote(it, b, week);
+  };
 
   bindActions(root, {
     blockName: (el) => { b.name = el.value; save(false); },
     weeks: (el) => { b.weeks = Math.max(1, Number(el.value) || 1); if (b.deloadWeek >= b.weeks) b.deloadWeek = null; save(); },
     deload: (el) => { b.deloadWeek = el.value === '' ? null : Number(el.value); save(); },
-    previewWeek: (el) => view({ w: el.value }),
+    pickWeek: (el) => view({ w: el.dataset.w }),
+    weekReset: (el) => { const { di, ii } = itemOf(el); const it = b.days[di].items[ii]; if (it.byWeek) { delete it.byWeek[week]; if (!Object.keys(it.byWeek).length) delete it.byWeek; } save(); },
+    progPreview: () => progressionSheet(b, $('#prog-text', root).value, $('#prog-scope', root).value, () => { store.put('blocks', b); view({ prog: null }); }),
+    progClear: async () => {
+      const scope = $('#prog-scope', root).value;
+      if (!await ask(`Weeks 2 to ${b.weeks} go back to week 1 and the "each week" rules${scope === '' ? '' : ` on ${b.days[scope].name}`}.`, { title: 'Clear week changes?', ok: 'Clear', danger: true })) return;
+      const c = clearWeeks(b, scope === '' ? null : [Number(scope)]);
+      b.days = c.days; save(); toast('Week changes cleared');
+    },
     pickDay: (el) => { const di = Number(el.dataset.di); view({ day: di, with: di === other ? day : other }); },
     pickOther: (el) => view({ with: el.value || null }),
     dayName: (el) => {
@@ -449,6 +555,13 @@ export function blockEditor(root, { id }, query) {
       const { di, ii } = itemOf(el);
       const k = el.dataset.k;
       const it = b.days[di].items[ii];
+      if (week && !it.warmup && WEEK_KEYS.includes(k)) {
+        let v = num(el.value);
+        if (k === 'weight') v = store.readW(v, it.unit);
+        setWeekValue(it, b, week, k, v);
+        markOwn(el, it);
+        return save(false);
+      }
       if (['note', 'tempo', 'group', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
       else if (k === 'weight') it[k] = store.readW(num(el.value), it.unit);
       else it[k] = num(el.value);
@@ -458,6 +571,7 @@ export function blockEditor(root, { id }, query) {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
       delete it.pct; delete it.weight;
+      for (const w of Object.values(it.byWeek || {})) { delete w.pct; delete w.weight; }
       if (el.value === 'pct') it.pct = 70;
       const kg = it.unit === 'kg';
       if (el.value === 'weight') it.weight = kg ? store.readW(20, 'kg') : 45;
@@ -489,9 +603,17 @@ export function blockEditor(root, { id }, query) {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
       const k = el.dataset.k;
+      const input = el.parentElement.querySelector('input');
+      if (week && !it.warmup) {
+        const v = Math.max(k === 'sets' ? 1 : 0, (Number(input.value) || 0) + Number(el.dataset.d));
+        setWeekValue(it, b, week, k, v);
+        input.value = v;
+        markOwn(input, it);
+        return save(false);
+      }
       it[k] = Math.max(k === 'sets' ? 1 : 0, (it[k] || 0) + Number(el.dataset.d));
       // Update the box in place; a full redraw would lose the next quick tap.
-      el.parentElement.querySelector('input').value = it[k];
+      input.value = it[k];
       save(false);
     },
     measure: (el) => {
