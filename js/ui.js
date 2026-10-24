@@ -1,5 +1,7 @@
 // Small view helpers shared by the athlete and coach screens.
 
+import { embedFor, splitLinks } from './video.js';
+
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -96,6 +98,47 @@ export function askFields(title, fields, { ok = 'Save', cancel = 'Cancel' } = {}
       wrap._onClose = null; closeSheet(); resolve(out);
     });
     first.focus(); first.select();
+  });
+}
+
+// Exercise demo video in a pop-up over the app, so athletes never leave
+// their workout. Links the app can't play inside (some sites block it) get
+// a button that opens them in a new tab instead.
+export function demoSheet(link, title = 'Demo video') {
+  const e = embedFor(link);
+  const open = `<a class="link small" href="${esc(link)}" target="_blank" rel="noopener">Open in a new tab ↗</a>`;
+  const player = !e ? `<p class="ask-msg">This link can't play inside the app.</p><a class="btn wide" href="${esc(link)}" target="_blank" rel="noopener">Open video ↗</a>`
+    : e.kind === 'file' ? `<video class="demo-video" src="${esc(e.src)}" controls playsinline autoplay></video>`
+    : `<div class="demo-frame ${e.tall ? 'tall' : ''}"><iframe src="${esc(e.src)}" title="${esc(title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
+  const wrap = sheet(title, `${player}${e ? `<p class="demo-foot">${open}</p>` : ''}`);
+  wrap.classList.add('demo');
+  return wrap;
+}
+
+// Text with any links turned into buttons that open the demo pop-up, or
+// plain new-tab links for sites the app can't play inside.
+export function linkify(text) {
+  return splitLinks(text).map((p) => {
+    if (!p.url) return esc(p.text);
+    if (embedFor(p.url)) return `<button type="button" class="demo-link" data-demo="${esc(p.url)}">▶ Watch video</button>`;
+    let host = p.url;
+    try { host = new URL(p.url).hostname.replace(/^www\./, ''); } catch { /* keep the raw link */ }
+    return `<a class="demo-link" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(host)} ↗</a>`;
+  }).join('');
+}
+
+// Any [data-demo] button anywhere opens its link in the demo pop-up (or a
+// new tab when the site won't play inside the app).
+export function demoLinks() {
+  document.addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-demo]');
+    if (!el) return;
+    ev.preventDefault();
+    if (!embedFor(el.dataset.demo)) {
+      const w = window.open(el.dataset.demo, '_blank');
+      if (w) { w.opener = null; return; }
+    }
+    demoSheet(el.dataset.demo, el.dataset.title || 'Demo video');
   });
 }
 

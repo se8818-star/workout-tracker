@@ -1,8 +1,9 @@
 // Ready-made programs a coach can copy into their own list from the Programs
 // page. Each template brings the exercises it needs; any the team's library
-// already has (same id) are left as they are.
+// already has (same id) are left as they are, apart from picking up a demo
+// video they don't have yet.
 
-const X = (id, name, pattern, body, loaded = true) => ({ id, name, pattern, body, loaded, alts: [] });
+const X = (id, name, pattern, body, loaded = true, video) => ({ id, name, pattern, body, loaded, alts: [], ...(video ? { video } : {}) });
 
 // RIR (reps in reserve) maps onto the app's RPE field: RIR 0 = RPE 10.
 const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo, measure, secs } = {}) => {
@@ -146,17 +147,18 @@ const FALL_2026_BLOCK = {
 // 10-15 reps; the sets themselves grow by week (week 1 one set, weeks 2-3
 // two, week 4 on three), which the athlete adds with "+ Set".
 const CHRISTINA_FB_EXERCISES = [
-  X('db-bench', 'Dumbbell bench press', 'push', 'upper'),
-  X('back-squat', 'Back squat', 'squat', 'lower'),
-  X('chin-up', 'Chin-up', 'pull', 'upper', false),
-  X('rdl', 'Romanian deadlift', 'hinge', 'lower'),
-  X('arnold-press', 'Arnold shoulder press', 'push', 'upper'),
-  X('copenhagen-knee', 'Copenhagen plank (from knee)', 'core', 'lower', false),
+  X('db-bench', 'Dumbbell bench press', 'push', 'upper', true, 'https://youtu.be/JN9DVjlafcg'),
+  X('back-squat', 'Back squat', 'squat', 'lower', true, 'https://youtube.com/shorts/gjMYET5fT5k'),
+  X('chin-up', 'Chin-up', 'pull', 'upper', false, 'https://youtube.com/shorts/Szy41PBWImo'),
+  X('rdl', 'Romanian deadlift', 'hinge', 'lower', true, 'https://youtube.com/shorts/5swaQQ3pWh8'),
+  X('arnold-press', 'Arnold shoulder press', 'push', 'upper', true, 'https://youtube.com/shorts/FeiPuPtqnBg'),
+  X('copenhagen-knee', 'Copenhagen plank (from knee)', 'core', 'lower', false, 'https://youtube.com/shorts/imJBlGadATo'),
 ];
 
 const SETS_10_15 = 'Week 1: 1 working set. Weeks 2-3: 2 sets. Week 4 on: 3 sets (tap + Set).';
 const RULES_10_15 = 'Do 2-3 warm-up sets first. Fail before 10 reps: too heavy, count the set and drop the weight. 15 reps easily: call it a warm-up and go heavier. Hit 15 at a weight: add weight next week.';
-const ss = (group, exerciseId, demo, opts) => ({ ...it(exerciseId, 1, 10, { range: '10-15', ...opts, note: [opts.note, `Demo: ${demo}`].filter(Boolean).join('\n') }), group });
+// Demo videos live on the exercises (athletes tap "Watch demo").
+const ss = (group, exerciseId, opts = {}) => ({ ...it(exerciseId, 1, 10, { range: '10-15', ...opts }), group });
 
 const CHRISTINA_FB_BLOCK = {
   name: 'Christina FB',
@@ -166,12 +168,12 @@ const CHRISTINA_FB_BLOCK = {
     {
       name: 'Full body',
       items: [
-        ss('A', 'db-bench', 'https://youtu.be/JN9DVjlafcg', { rir: 1, note: `${SETS_10_15}\n${RULES_10_15}` }),
-        ss('A', 'back-squat', 'https://youtube.com/shorts/gjMYET5fT5k', { rir: 1 }),
-        ss('B', 'chin-up', 'https://youtube.com/shorts/Szy41PBWImo', { note: 'As many reps as possible' }),
-        ss('B', 'rdl', 'https://youtube.com/shorts/5swaQQ3pWh8', { rir: 1 }),
-        ss('C', 'arnold-press', 'https://youtube.com/shorts/FeiPuPtqnBg', { rir: 1 }),
-        ss('C', 'copenhagen-knee', 'https://youtube.com/shorts/imJBlGadATo', { note: 'As many reps as possible' }),
+        ss('A', 'db-bench', { rir: 1, note: `${SETS_10_15}\n${RULES_10_15}` }),
+        ss('A', 'back-squat', { rir: 1 }),
+        ss('B', 'chin-up', { note: 'As many reps as possible' }),
+        ss('B', 'rdl', { rir: 1 }),
+        ss('C', 'arnold-press', { rir: 1 }),
+        ss('C', 'copenhagen-knee', { note: 'As many reps as possible' }),
       ],
     },
   ],
