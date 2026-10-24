@@ -127,6 +127,39 @@ export function prescribedReps(item, week) {
   return prog.type === 'add_reps' ? reps + (prog.step || 0) * week : reps;
 }
 
+// A rep range ("10-15") keeps its low end in item.reps and its top in
+// item.repsTo. The top moves with the weekly rep rule; a week with its own
+// reps uses that week's own top (or none, for a single number).
+export function prescribedRepsTo(item, week) {
+  const reps = prescribedReps(item, week);
+  let top = null;
+  if (weekOverride(item, week, 'reps') != null) top = weekOverride(item, week, 'repsTo');
+  else if (item.repsTo != null) top = item.repsTo + (prescribedReps(item, week) - (item.reps || 0));
+  return top != null && top > reps ? top : null;
+}
+
+// "10-15", "10–15", "10 to 15" -> {reps: 10, repsTo: 15}; "12" -> {reps: 12, repsTo: null}.
+// Empty gives {reps: null, repsTo: null}; anything else is null.
+export function parseReps(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return { reps: null, repsTo: null };
+  const m = t.match(/^(\d+)\s*(?:(?:-|–|—|to)\s*(\d+))?$/i);
+  if (!m) return null;
+  let lo = Number(m[1]), hi = m[2] == null ? null : Number(m[2]);
+  if (hi != null && hi < lo) [lo, hi] = [hi, lo];
+  return { reps: lo, repsTo: hi != null && hi > lo ? hi : null };
+}
+
+// 10, 15 -> "10–15"; 10, null -> "10". `dash` picks the joiner (a plain
+// hyphen for boxes the coach types in).
+export function repsText(reps, repsTo, dash = '–') {
+  if (reps == null) return '';
+  return repsTo != null && repsTo > reps ? `${reps}${dash}${repsTo}` : `${reps}`;
+}
+
+// The reps a planned set counts for in totals: the middle of a range.
+export const planReps = (lo, hi) => (hi != null && hi > lo ? Math.round((lo + hi) / 2) : lo);
+
 // Build the concrete session for one athlete: block day + week -> rows with sets.
 export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
   const day = block.days[dayIndex];
@@ -136,6 +169,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
     items: day.items.map((item) => {
       const measure = measureOf(item);
       const reps = isCount(measure) ? prescribedReps(item, week) : null;
+      const repsTo = isCount(measure) ? prescribedRepsTo(item, week) : null;
       const secs = measure === 'time' ? prescribedSecs(item, week) : null;
       const noLoad = measure === 'none' || measure === 'breaths';
       const weight = noLoad ? null : prescribedWeight(item, athlete, week, block, rounding);
@@ -149,7 +183,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',
-        sets: Array.from({ length: n }, () => ({ reps, secs, weight, ...(pct != null ? { pct } : {}), rpe: item.rpe ?? null, done: false })),
+        sets: Array.from({ length: n }, () => ({ reps, ...(repsTo != null ? { repsTo } : {}), secs, weight, ...(pct != null ? { pct } : {}), rpe: item.rpe ?? null, done: false })),
       };
     }),
   };
@@ -159,7 +193,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
 // and the boxes start empty for the athlete to fill.
 export function sessionEntries(s, unit) {
   return s.items.map((it) => ({ ...it, unit: it.unit || unit, sets: it.sets.map((x) => ({
-    targetReps: x.reps, targetSecs: x.secs, targetWeight: x.weight, ...(x.pct != null ? { targetPct: x.pct } : {}),
+    targetReps: x.reps, ...(x.repsTo != null ? { targetRepsTo: x.repsTo } : {}), targetSecs: x.secs, targetWeight: x.weight, ...(x.pct != null ? { targetPct: x.pct } : {}),
     rpe: x.rpe, reps: null, secs: null, weight: null, done: false,
   })) }));
 }
@@ -188,8 +222,8 @@ export function refreshEntries(entries, fresh) {
       sets: e.sets.map((s, j) => {
         const t = f.sets[Math.min(j, f.sets.length - 1)];
         if (!t || s.done) return s;
-        const { targetPct, ...rest } = s;
-        return { ...rest, targetReps: t.targetReps, targetSecs: t.targetSecs, targetWeight: e.swappedFrom ? null : t.targetWeight,
+        const { targetPct, targetRepsTo, ...rest } = s;
+        return { ...rest, targetReps: t.targetReps, ...(t.targetRepsTo != null ? { targetRepsTo: t.targetRepsTo } : {}), targetSecs: t.targetSecs, targetWeight: e.swappedFrom ? null : t.targetWeight,
           ...(t.targetPct != null && !e.swappedFrom ? { targetPct: t.targetPct } : {}), rpe: t.rpe };
       }),
     };
@@ -207,8 +241,9 @@ export function sessionTotals(session, exercises, onlyDone = true) {
     const ex = exercises[entry.exerciseId];
     if (!ex || entry.warmup) continue; // warmups don't count toward training load
     for (const s of setsOf(entry, onlyDone)) {
-      // Breaths count as sets but not as reps, tonnage or contacts.
-      const reps = entry.measure === 'breaths' ? 0 : Number(s.reps) || 0;
+      // Breaths count as sets but not as reps, tonnage or contacts. A planned
+      // rep range counts as its middle; logged sets count what was done.
+      const reps = entry.measure === 'breaths' ? 0 : planReps(Number(s.reps) || 0, s.repsTo);
       const w = Number(s.weight) || 0;
       t.sets += 1;
       t.reps += reps;
@@ -329,12 +364,14 @@ export function defaultWeekdays(n) {
 // ---- quick entry ----
 
 // Parses lines like "Back squat 4x5 @80%", "Box jump 3x5", "Bench 3x8 @185 +5/wk",
-// "RDL 3x10 @RPE7". Returns {name, sets, reps, pct?, weight?, rpe?, progression?} or null.
+// "RDL 3x10 @RPE7", "Bench 3x10-15". Returns {name, sets, reps, repsTo?, pct?,
+// weight?, rpe?, progression?} or null.
 export function parseQuickEntry(line) {
-  const m = line.trim().match(/^(.+?)\s+(\d+)\s*[x×]\s*(\d+)(.*)$/i);
+  const m = line.trim().match(/^(.+?)\s+(\d+)\s*[x×]\s*(\d+)(?:\s*[-–]\s*(\d+))?(.*)$/i);
   if (!m) return null;
   const out = { name: m[1].trim(), sets: Number(m[2]), reps: Number(m[3]) };
-  let rest = m[4];
+  if (m[4] != null) { const r = parseReps(`${m[3]}-${m[4]}`); out.reps = r.reps; if (r.repsTo != null) out.repsTo = r.repsTo; }
+  let rest = m[5];
   const rpe = rest.match(/@\s*rpe\s*(\d+(?:\.\d+)?)/i);
   if (rpe) { out.rpe = Number(rpe[1]); rest = rest.replace(rpe[0], ''); }
   const pct = rest.match(/@\s*(\d+(?:\.\d+)?)\s*%/);

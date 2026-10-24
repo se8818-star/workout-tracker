@@ -19,7 +19,9 @@ test('Fall 2026 builds a session with RIR mapped to RPE and notes kept', () => {
   assert.equal(fly.sets.length, 3);
   assert.equal(fly.sets[0].rpe, 9.5);
   assert.equal(fly.tempo, '3-1-X-1');
-  assert.match(fly.note, /Reps 10-12 · RIR 1\/0 · Rest 3-5 min/);
+  assert.match(fly.note, /\nRIR 1\/0 · Rest 3-5 min$/);
+  assert.equal(fly.sets[0].reps, 10);
+  assert.equal(fly.sets[0].repsTo, 12);
 });
 
 test('the Fall 2026 warmup is its own template, left out of training totals', () => {
@@ -42,8 +44,10 @@ test('Christina FB is three supersets with demo videos on its exercises', () => 
   const bench = s.items[0];
   assert.equal(bench.sets.length, 1);
   assert.equal(bench.sets[0].reps, 10);
+  assert.equal(bench.sets[0].repsTo, 15);
   assert.equal(bench.sets[0].rpe, 9);
-  assert.match(bench.note, /Reps 10-15 · RIR 1/);
+  assert.match(bench.note, /RIR 1/);
+  assert.doesNotMatch(bench.note, /Reps 10-15/);
   assert.doesNotMatch(bench.note, /https?:/);
   assert.ok(t.exercises.every((e) => e.video), 'every exercise has a demo');
   assert.equal(t.exercises.find((e) => e.id === 'db-bench').video, 'https://youtu.be/JN9DVjlafcg');

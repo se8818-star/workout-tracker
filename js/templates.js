@@ -6,9 +6,11 @@
 const X = (id, name, pattern, body, loaded = true, video) => ({ id, name, pattern, body, loaded, alts: [], ...(video ? { video } : {}) });
 
 // RIR (reps in reserve) maps onto the app's RPE field: RIR 0 = RPE 10.
+// A rep range like '10-15' becomes the target itself (reps 10, repsTo 15).
 const it = (exerciseId, sets, reps, { rir, rest, range, note, tempo, measure, secs } = {}) => {
-  const lines = [note, [range && `Reps ${range}`, rir != null && `RIR ${rir}`, rest && `Rest ${rest}`].filter(Boolean).join(' · ')].filter(Boolean);
+  const lines = [note, [rir != null && `RIR ${rir}`, rest && `Rest ${rest}`].filter(Boolean).join(' · ')].filter(Boolean);
   const item = { exerciseId, sets, reps };
+  if (range) { const [lo, hi] = range.split('-').map(Number); item.reps = lo; item.repsTo = hi; }
   if (rir != null) item.rpe = 10 - (rir === '1/0' ? 0.5 : Number(rir));
   if (tempo) item.tempo = tempo;
   if (measure) item.measure = measure;
@@ -144,7 +146,7 @@ const FALL_2026_BLOCK = {
 };
 
 // Second sheet: one full body day of three supersets. Every set aims for
-// 10-15 reps; the sets themselves grow by week (week 1 one set, weeks 2-3
+// 10-15 reps (a real range target); the sets themselves grow by week (week 1 one set, weeks 2-3
 // two, week 4 on three), which the athlete adds with "+ Set".
 const CHRISTINA_FB_EXERCISES = [
   X('db-bench', 'Dumbbell bench press', 'push', 'upper', true, 'https://youtu.be/JN9DVjlafcg'),
