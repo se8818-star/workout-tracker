@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, sheet, closeSheet, demoSheet, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
@@ -223,6 +223,15 @@ function stepper(label, k, value, min, step = 1, own = false) {
     <button class="step-btn" data-action="step" data-k="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
 }
 
+// The reps box takes one number or a range like "10-15". The − / + buttons
+// move both ends of a range.
+function repsStepper(label, reps, repsTo, own = false) {
+  return `<div class="stepper reps-stepper ${own ? 'wk-own' : ''}"><span>${label}</span>
+    <div class="stepper-row"><button class="step-btn" data-action="step" data-k="reps" data-d="-1" aria-label="Less ${label.toLowerCase()}">−</button>
+    <input type="text" autocomplete="off" placeholder="10-15" value="${repsText(reps, repsTo, '-')}" data-action="repsField" data-k="reps" aria-label="${label}, one number or a range like 10-15">
+    <button class="step-btn" data-action="step" data-k="reps" data-d="1" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
+}
+
 const MEASURES = [['reps', 'Reps'], ['time', 'Time'], ['breaths', 'Breaths'], ['none', 'No sets']];
 
 // Switch a program item to another measure, keeping its numbers sensible.
@@ -271,12 +280,30 @@ function setWeekValue(it, b, week, k, v) {
   if (!Object.keys(it.byWeek).length) delete it.byWeek;
 }
 
+// Reps for one week: a number or a range, kept together. A week that matches
+// what the rule would give anyway isn't kept.
+function setWeekReps(it, week, r) {
+  it.byWeek = it.byWeek || {};
+  const wk = { ...it.byWeek[week] };
+  delete wk.reps; delete wk.repsTo;
+  it.byWeek[week] = wk;
+  const same = r.reps === prescribedReps(it, week) && (r.repsTo ?? null) === prescribedRepsTo(it, week);
+  if (r.reps != null && !same) { wk.reps = r.reps; if (r.repsTo != null) wk.repsTo = r.repsTo; }
+  if (!Object.keys(wk).length) delete it.byWeek[week];
+  if (!Object.keys(it.byWeek).length) delete it.byWeek;
+}
+
+function setReps(it, r) {
+  it.reps = r.reps;
+  if (r.repsTo != null) it.repsTo = r.repsTo; else delete it.repsTo;
+}
+
 // What an item shows on a week tab: that week's numbers, rule and deload included.
 function weekNumbers(item, b, week) {
-  if (!week || item.warmup) return { sets: item.sets, reps: item.reps, secs: item.secs, pct: item.pct, weight: item.weight, own: {} };
+  if (!week || item.warmup) return { sets: item.sets, reps: item.reps, repsTo: prescribedRepsTo(item, 0), secs: item.secs, pct: item.pct, weight: item.weight, own: {} };
   const own = Object.fromEntries(WEEK_KEYS.map((k) => [k, weekOverride(item, week, k) != null]));
   return {
-    sets: prescribedSets(item, b, week), reps: prescribedReps(item, week), secs: prescribedSecs(item, week),
+    sets: prescribedSets(item, b, week), reps: prescribedReps(item, week), repsTo: prescribedRepsTo(item, week), secs: prescribedSecs(item, week),
     pct: prescribedPct(item, week, b), weight: item.weight != null ? prescribedWeight(item, null, week, b, store.roundStep()) : null, own,
   };
 }
@@ -291,7 +318,7 @@ function weekCell(item, b, w) {
   const n = weekNumbers(item, b, w);
   const m = measureOf(item);
   if (m === 'none') return '✓';
-  let t = `${n.sets}×${m === 'time' ? `${n.secs}s` : n.reps}`;
+  let t = `${n.sets}×${m === 'time' ? `${n.secs}s` : repsText(n.reps, n.repsTo)}`;
   if (item.pct != null) t += ` · ${n.pct}%`;
   else if (item.weight != null) t += ` · ${store.showW(n.weight, item.unit || store.unit())} ${item.unit || store.unit()}`;
   return t;
@@ -352,7 +379,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0) {
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', nums.sets, 1, 1, nums.own.sets)}
       <span class="times" aria-hidden="true">×</span>
-      ${measure === 'time' ? stepper('Seconds', 'secs', nums.secs, 0, 5, nums.own.secs) : stepper(measure === 'breaths' ? 'Breaths' : 'Reps', 'reps', nums.reps, 0, 1, nums.own.reps)}
+      ${measure === 'time' ? stepper('Seconds', 'secs', nums.secs, 0, 5, nums.own.secs) : repsStepper(measure === 'breaths' ? 'Breaths' : 'Reps', nums.reps, nums.repsTo, nums.own.reps)}
     </div>`}
     ${wk ? `<p class="wk-note small">${weekNote(item, b, wk)}</p>` : ''}
     ${x && measure !== 'none' && measure !== 'breaths' ? `<div class="item-fields">
@@ -445,7 +472,7 @@ export function blockEditor(root, { id }, query) {
         <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
         <details class="quick-wrap"><summary>Or type a list</summary>
           <div class="quick">
-            <textarea rows="2" placeholder="One per line:&#10;Back squat 4x5 @80% +2.5%/wk&#10;Box jump 3x5" data-di="${di}" aria-label="Quick add exercises"></textarea>
+            <textarea rows="2" placeholder="One per line:&#10;Back squat 4x5 @80% +2.5%/wk&#10;DB row 3x10-15&#10;Box jump 3x5" data-di="${di}" aria-label="Quick add exercises"></textarea>
             <button class="chip" data-action="quickAdd" data-di="${di}">Add</button>
           </div>
         </details>
@@ -572,6 +599,16 @@ export function blockEditor(root, { id }, query) {
       else it[k] = num(el.value);
       save(false);
     },
+    repsField: (el) => {
+      const { di, ii } = itemOf(el);
+      const it = b.days[di].items[ii];
+      const r = parseReps(el.value);
+      el.classList.toggle('bad', !r);
+      if (!r) return toast('Type one number, or a range like 10-15');
+      if (week && !it.warmup) { setWeekReps(it, week, r); markOwn(el, it); }
+      else setReps(it, r);
+      save(false);
+    },
     loadType: (el) => {
       const { di, ii } = itemOf(el);
       const it = b.days[di].items[ii];
@@ -609,6 +646,17 @@ export function blockEditor(root, { id }, query) {
       const it = b.days[di].items[ii];
       const k = el.dataset.k;
       const input = el.parentElement.querySelector('input');
+      if (k === 'reps') {
+        // Both ends of a range move together.
+        const cur = parseReps(input.value) || { reps: it.reps, repsTo: it.repsTo };
+        const d = Number(el.dataset.d);
+        const lo = Math.max(0, (cur.reps || 0) + d);
+        const r = { reps: lo, repsTo: cur.repsTo != null ? Math.max(lo + 1, cur.repsTo + d) : null };
+        if (week && !it.warmup) { setWeekReps(it, week, r); markOwn(input, it); } else setReps(it, r);
+        input.value = repsText(r.reps, r.repsTo, '-');
+        input.classList.remove('bad');
+        return save(false);
+      }
       if (week && !it.warmup) {
         const v = Math.max(k === 'sets' ? 1 : 0, (Number(input.value) || 0) + Number(el.dataset.d));
         setWeekValue(it, b, week, k, v);
@@ -695,7 +743,7 @@ export function blockEditor(root, { id }, query) {
           toast(`Added "${q.name}" to the library. Set its movement type there.`);
         }
         const item = { exerciseId: x.id, sets: q.sets, reps: q.reps };
-        for (const k of ['pct', 'rpe', 'progression']) if (q[k] != null) item[k] = q[k];
+        for (const k of ['repsTo', 'pct', 'rpe', 'progression']) if (q[k] != null) item[k] = q[k];
         // Typed weights are in this device's unit unless the line says lb or kg.
         item.unit = q.progUnit || store.unit();
         if (q.weight != null) item.weight = store.readW(q.weight, item.unit);
@@ -703,7 +751,7 @@ export function blockEditor(root, { id }, query) {
         b.days[di].items.push(item);
       }
       save();
-      if (bad.length) toast(`Couldn't read: ${bad.join('; ')}. Use "Name 3x5 @80%".`);
+      if (bad.length) toast(`Couldn't read: ${bad.join('; ')}. Use "Name 3x5 @80%" or "Name 3x10-15".`);
     },
   });
 }

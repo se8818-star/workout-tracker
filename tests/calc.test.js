@@ -211,3 +211,52 @@ test('an ended assignment stops after its end date', () => {
   assert.deepEqual(scheduledOn(a, b, '2026-10-19'), { week: 0, dayIndex: 0 });
   assert.equal(scheduledOn(a, b, '2026-10-26'), null);
 });
+
+test('rep ranges: typing, showing, weeks and the weekly rule', () => {
+  assert.deepEqual(calc.parseReps('10-15'), { reps: 10, repsTo: 15 });
+  assert.deepEqual(calc.parseReps(' 10 – 15 '), { reps: 10, repsTo: 15 });
+  assert.deepEqual(calc.parseReps('10 to 15'), { reps: 10, repsTo: 15 });
+  assert.deepEqual(calc.parseReps('15-10'), { reps: 10, repsTo: 15 });
+  assert.deepEqual(calc.parseReps('12'), { reps: 12, repsTo: null });
+  assert.deepEqual(calc.parseReps('8-8'), { reps: 8, repsTo: null });
+  assert.deepEqual(calc.parseReps(''), { reps: null, repsTo: null });
+  assert.equal(calc.parseReps('ten'), null);
+  assert.equal(calc.repsText(10, 15), '10–15');
+  assert.equal(calc.repsText(10, null), '10');
+  const item = { exerciseId: 'squat', sets: 3, reps: 10, repsTo: 15, progression: { type: 'add_reps', step: 1 }, byWeek: { 2: { reps: 12 }, 3: { reps: 8, repsTo: 12 } } };
+  assert.equal(calc.prescribedRepsTo(item, 0), 15);
+  assert.equal(calc.prescribedRepsTo(item, 1), 16); // the range moves with the rule
+  assert.equal(calc.prescribedRepsTo(item, 2), null); // week 3 is a single 12
+  assert.equal(calc.prescribedRepsTo(item, 3), 12);
+  assert.equal(calc.prescribedRepsTo({ reps: 8 }, 0), null);
+});
+
+test('a rep range is the athlete target; totals count the middle until logged', () => {
+  const b = { weeks: 1, days: [{ name: 'A', items: [{ exerciseId: 'squat', sets: 2, reps: 10, repsTo: 15, weight: 100 }] }] };
+  const s = buildSession(b, 0, 0, athlete);
+  assert.equal(s.items[0].sets[0].reps, 10);
+  assert.equal(s.items[0].sets[0].repsTo, 15);
+  assert.equal(sessionTotals(s, ex, false).reps, 26); // 13 + 13
+  const entries = calc.sessionEntries(s, 'lb');
+  assert.equal(entries[0].sets[0].targetReps, 10);
+  assert.equal(entries[0].sets[0].targetRepsTo, 15);
+  assert.equal(entries[0].sets[0].reps, null);
+  entries[0].sets[0] = { ...entries[0].sets[0], reps: 14, weight: 100, done: true };
+  assert.equal(sessionTotals({ entries }, ex, true).reps, 14);
+  // The coach narrows the range: untouched sets pick it up, the logged set stays.
+  b.days[0].items[0].repsTo = 12;
+  const fresh = calc.sessionEntries(buildSession(b, 0, 0, athlete), 'lb');
+  const r = calc.refreshEntries(entries, fresh);
+  assert.equal(r[0].sets[0].reps, 14);
+  assert.equal(r[0].sets[1].targetRepsTo, 12);
+  // ...and turning it back into one number drops the top.
+  delete b.days[0].items[0].repsTo;
+  const r2 = calc.refreshEntries(r, calc.sessionEntries(buildSession(b, 0, 0, athlete), 'lb'));
+  assert.equal(r2[0].sets[1].targetRepsTo, undefined);
+});
+
+test('quick entry reads rep ranges', () => {
+  assert.deepEqual(parseQuickEntry('DB row 3x10-15'), { name: 'DB row', sets: 3, reps: 10, repsTo: 15 });
+  assert.deepEqual(parseQuickEntry('Bench 4x8–12 @185'), { name: 'Bench', sets: 4, reps: 8, repsTo: 12, weight: 185 });
+  assert.deepEqual(parseQuickEntry('Bench 3x8'), { name: 'Bench', sets: 3, reps: 8 });
+});

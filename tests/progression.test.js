@@ -83,3 +83,14 @@ test('the words replace an item\'s own weekly rule for the same number', () => {
   assert.deepEqual(r.replaced.length, 2);
   assert.equal(prescribedWeight(r.block.days[0].items[0], { maxes: { sq: 200 } }, 2, r.block), 145); // 72.5% of 200
 });
+
+test('a rep range moves as a whole with "add 1 rep per week"', () => {
+  const b = { weeks: 3, deloadWeek: null, days: [{ name: 'A', items: [{ exerciseId: 'x', sets: 3, reps: 10, repsTo: 15 }] }] };
+  const p = parseProgression('Add 1 rep per week');
+  const r = applyProgression(b, p.rules);
+  const it = r.block.days[0].items[0];
+  assert.deepEqual(it.byWeek[1], { reps: 11, repsTo: 16 });
+  assert.deepEqual(it.byWeek[2], { reps: 12, repsTo: 17 });
+  const s = buildSession(r.block, 0, 2, {});
+  assert.equal(s.items[0].sets[0].repsTo, 17);
+});

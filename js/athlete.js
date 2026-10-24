@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -46,10 +46,12 @@ function targetText(set, measure, u, loaded = true) {
     const t = fmtSecs(set.targetSecs ?? set.secs);
     return w && t ? `${w} × ${t}` : t;
   }
-  const reps = set.targetReps ?? set.reps;
+  // A rep range shows as "10–15"; the athlete logs what they actually did.
+  const n = set.targetReps ?? set.reps;
+  const reps = set.targetReps != null ? repsText(n, set.targetRepsTo) : repsText(n, set.repsTo);
   const word = measure === 'breaths' ? 'breath' : 'rep';
   if (w) return `${w} × ${reps}`;
-  return reps ? `${reps} ${word}${reps === 1 ? '' : 's'}` : '';
+  return n ? `${reps} ${word}${reps === '1' ? '' : 's'}` : '';
 }
 
 // Group letters for supersets ("A1", "A2") or plain order numbers; warmup
@@ -137,7 +139,7 @@ function entryCard(log, entry, i, label) {
   // The box the athlete fills in: reps, breaths, seconds, or nothing for a check-off item.
   const k = measure === 'time' ? 'secs' : 'reps';
   const boxName = { time: 'Secs', breaths: 'Breaths' }[measure] || 'Reps';
-  const box = (s, j) => (measure === 'none' ? '' : `<label class="field"><input type="number" inputmode="numeric" min="0" value="${s[k] ?? ''}" placeholder="${s[measure === 'time' ? 'targetSecs' : 'targetReps'] || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="${k}" aria-label="${boxName}, set ${j + 1}"><span>${boxName.toLowerCase()}</span></label>`);
+  const box = (s, j) => (measure === 'none' ? '' : `<label class="field"><input type="number" inputmode="numeric" min="0" value="${s[k] ?? ''}" placeholder="${(measure === 'time' ? s.targetSecs : repsText(s.targetReps, s.targetRepsTo)) || ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="${k}" aria-label="${boxName}, set ${j + 1}"><span>${boxName.toLowerCase()}</span></label>`);
   const cols = `${loaded ? '' : 'no-load'} ${measure === 'none' ? 'check-only' : ''}`;
   const tags = [];
   if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
@@ -231,7 +233,8 @@ export function session(root, { id, date, warm = false }) {
     toggleSet: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
       s.done = !s.done;
-      // Ticking a set with empty boxes logs it exactly as prescribed.
+      // Ticking a set with empty boxes logs it exactly as prescribed (the
+      // bottom of a rep range).
       if (s.done) {
         if (s.reps == null) s.reps = s.targetReps ?? null;
         if (s.secs == null) s.secs = s.targetSecs ?? null;
@@ -260,7 +263,7 @@ export function session(root, { id, date, warm = false }) {
       const e = log.entries[el.dataset.i], sets = e.sets;
       const last = sets[sets.length - 1] || {};
       e.setsChanged = true;
-      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, ...(last.targetPct != null ? { targetPct: last.targetPct } : {}), ...(last.unit ? { unit: last.unit } : {}), reps: null, secs: null, weight: null, done: false });
+      sets.push({ targetReps: last.targetReps ?? last.reps ?? null, ...(last.targetRepsTo != null ? { targetRepsTo: last.targetRepsTo } : {}), targetSecs: last.targetSecs ?? last.secs ?? null, targetWeight: last.targetWeight ?? last.weight ?? null, ...(last.targetPct != null ? { targetPct: last.targetPct } : {}), ...(last.unit ? { unit: last.unit } : {}), reps: null, secs: null, weight: null, done: false });
       persist(); rerender();
     },
     removeSet: (el) => { const e = log.entries[el.dataset.i]; e.sets.pop(); e.setsChanged = true; persist(); rerender(); },

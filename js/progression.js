@@ -234,6 +234,11 @@ export function applyProgression(block, rules, days = null) {
         const w = i + 1;
         byWeek[w] = { ...byWeek[w] };
         for (const k of r.fields) byWeek[w][k] = k === 'weight' ? Math.round(st.weight * 100) / 100 : st[k];
+        // A rep range moves as a whole: "+1 rep" on 10-15 gives 11-16.
+        if (r.fields.includes('reps')) {
+          delete byWeek[w].repsTo;
+          if (item.repsTo > item.reps) byWeek[w].repsTo = st.reps + (item.repsTo - item.reps);
+        }
       });
       item.byWeek = byWeek;
       if (r.fields.includes(RULE_FIELD[item.progression?.type])) { delete item.progression; replaced.push({ di, ii }); }
