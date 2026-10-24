@@ -35,7 +35,7 @@ test('the Fall 2026 warmup is its own template, left out of training totals', ()
   assert.equal(sessionTotals(s, ex, false).sets, 0);
 });
 
-test('Christina FB is three supersets with demo links in the notes', () => {
+test('Christina FB is three supersets with demo videos on its exercises', () => {
   const t = TEMPLATES.find((x) => x.id === 'christina-fb');
   const s = buildSession(t.block, 0, 0, { maxes: {} });
   assert.deepEqual(s.items.map((x) => x.group), ['A', 'A', 'B', 'B', 'C', 'C']);
@@ -44,6 +44,8 @@ test('Christina FB is three supersets with demo links in the notes', () => {
   assert.equal(bench.sets[0].reps, 10);
   assert.equal(bench.sets[0].rpe, 9);
   assert.match(bench.note, /Reps 10-15 · RIR 1/);
-  assert.match(bench.note, /Demo: https:\/\/youtu\.be\/JN9DVjlafcg/);
+  assert.doesNotMatch(bench.note, /https?:/);
+  assert.ok(t.exercises.every((e) => e.video), 'every exercise has a demo');
+  assert.equal(t.exercises.find((e) => e.id === 'db-bench').video, 'https://youtu.be/JN9DVjlafcg');
   assert.equal(s.items[2].sets[0].rpe, null);
 });

@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, demoSheet, PATTERN_LABEL, $ } from './ui.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled } from './sync.js';
@@ -177,10 +177,14 @@ export function blocks(root) {
       location.hash = `#/coach/block/${b.id}`;
     },
     // Copies the template into this team's programs, adding any exercises
-    // the library is missing, then opens it for editing or assigning.
+    // (or demo videos) the library is missing, then opens it for editing or assigning.
     useTemplate: (el) => {
       const t = TEMPLATES.find((x) => x.id === el.dataset.id);
-      for (const e of t.exercises) if (!store.get('exercises', e.id)) store.put('exercises', structuredClone(e));
+      for (const e of t.exercises) {
+        const have = store.get('exercises', e.id);
+        if (!have) store.put('exercises', structuredClone(e));
+        else if (e.video && !have.video) store.put('exercises', { ...have, video: e.video });
+      }
       const b = store.put('blocks', { ...structuredClone(t.block), id: store.uid('block') });
       toast(`Added "${b.name}". Assign it from here when you're ready.`);
       location.hash = `#/coach/block/${b.id}`;
@@ -269,7 +273,8 @@ function itemRow(item, di, ii, ex, label) {
     </div>
     <div class="item-measure"><div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
-      ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps">Edit exercise ✎</a>` : ''}</div>
+      ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps, demo video">Edit exercise ✎</a>` : ''}
+      ${x?.video ? `<button class="link small" data-demo="${esc(x.video)}" data-title="${esc(x.name)}">▶ Demo</button>` : ''}</div>
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', item.sets, 1)}
       <span class="times" aria-hidden="true">×</span>
@@ -687,7 +692,8 @@ export function exercises(root, _p, query) {
       <label class="field-row"><span>Plyo contacts per rep</span><input type="number" min="0" id="ex-contacts" value="${x.contactsPerRep ?? ''}" placeholder="blank if not a plyo"></label>
       <label class="field-row"><span>Plyo intensity</span><select id="ex-tier"><option value="">–</option>${Object.entries(PLYO_TIERS).map(([k, v]) => `<option value="${k}" ${String(x.plyoTier) === k ? 'selected' : ''}>${k}: ${v}</option>`).join('')}</select></label>
       <label class="field-row"><span>Sprint meters per rep</span><input type="number" min="0" id="ex-meters" value="${x.metersPerRep ?? ''}"></label>
-      <label class="field-row"><span>Video link</span><input type="url" id="ex-video" value="${esc(x.video || '')}" placeholder="https://"></label>
+      <label class="field-row"><span>Demo video</span><input type="url" id="ex-video" value="${esc(x.video || '')}" placeholder="Paste a YouTube, Vimeo or Drive link"></label>
+      <p class="muted small ex-video-help">Athletes tap "Watch demo" on this exercise and it plays in a pop-up inside the app. <button class="link small" data-action="previewVideo">▶ Try it</button></p>
       <fieldset><legend>Swap options (same movement)</legend><div class="checks tall">${list.filter((e) => e.id !== x.id).map((e) => `<label class="check-row"><input type="checkbox" name="alt" value="${e.id}" ${x.alts?.includes(e.id) ? 'checked' : ''}> ${esc(e.name)}</label>`).join('')}</div></fieldset>
       <div class="row gap"><button class="btn" data-action="saveEx">Save</button><a class="btn ghost" href="${esc(back)}">Cancel</a></div>
       ${x.id ? `<button class="link danger-link" data-action="hideEx">Remove from library</button>` : ''}
@@ -697,12 +703,17 @@ export function exercises(root, _p, query) {
     ${form}
     <div class="row gap"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises"><a class="btn" href="#/coach/exercises?edit=new">+ New</a></div>
     <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody>
-      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a></td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
+      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a>${e.video ? ` <button class="demo-mark" data-demo="${esc(e.video)}" data-title="${esc(e.name)}" aria-label="Watch the ${esc(e.name)} demo">▶</button>` : ''}</td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
     </tbody></table></div>`;
   const q = $('#ex-q', root);
   q.addEventListener('input', () => root.querySelectorAll('tr[data-name]').forEach((r) => { r.hidden = !r.dataset.name.includes(q.value.toLowerCase()); }));
   if (x) $('#ex-form', root).scrollIntoView({ block: 'start' });
   bindActions(root, {
+    previewVideo: () => {
+      const link = $('#ex-video', root).value.trim();
+      if (!link) return toast('Paste a video link first');
+      demoSheet(link, $('#ex-name', root).value.trim() || 'Demo video');
+    },
     // Hidden rather than deleted, so past workouts and programs keep its name.
     hideEx: async () => {
       const msg = uses.length ? `It stays in the ${uses.length} program item${uses.length > 1 ? 's' : ''} that use it, and in past workouts, but can't be picked anymore.` : 'Past workouts keep its name. It just can\'t be picked anymore.';
@@ -722,7 +733,7 @@ export function exercises(root, _p, query) {
         contactsPerRep: v('#ex-contacts') ? Number(v('#ex-contacts')) : undefined,
         plyoTier: v('#ex-tier') ? Number(v('#ex-tier')) : undefined,
         metersPerRep: v('#ex-meters') ? Number(v('#ex-meters')) : undefined,
-        video: v('#ex-video') || undefined,
+        video: v('#ex-video').trim() || undefined,
         alts: [...root.querySelectorAll('input[name=alt]:checked')].map((c) => c.value),
       };
       store.put('exercises', obj);

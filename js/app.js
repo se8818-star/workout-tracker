@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import * as athleteViews from './athlete.js';
 import * as coachViews from './coach.js';
-import { esc, bindActions, toast, ask, styledSelects } from './ui.js';
+import { esc, bindActions, toast, ask, styledSelects, demoLinks } from './ui.js';
 import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
 
 store.load({ cloud: cloudEnabled });
@@ -142,6 +142,7 @@ function settingsView(root) {
 
 window.addEventListener('hashchange', () => render());
 styledSelects();
+demoLinks();
 render();
 startSync(() => render(true));
 
