@@ -34,3 +34,16 @@ test('the Fall 2026 warmup is its own template, left out of training totals', ()
   const s = buildSession(t.block, 0, 0, { maxes: {} });
   assert.equal(sessionTotals(s, ex, false).sets, 0);
 });
+
+test('Full body 10-15 is three supersets with demo links in the notes', () => {
+  const t = TEMPLATES.find((x) => x.id === 'full-body-10-15');
+  const s = buildSession(t.block, 0, 0, { maxes: {} });
+  assert.deepEqual(s.items.map((x) => x.group), ['A', 'A', 'B', 'B', 'C', 'C']);
+  const bench = s.items[0];
+  assert.equal(bench.sets.length, 1);
+  assert.equal(bench.sets[0].reps, 10);
+  assert.equal(bench.sets[0].rpe, 9);
+  assert.match(bench.note, /Reps 10-15 · RIR 1/);
+  assert.match(bench.note, /Demo: https:\/\/youtu\.be\/JN9DVjlafcg/);
+  assert.equal(s.items[2].sets[0].rpe, null);
+});
