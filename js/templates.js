@@ -145,7 +145,7 @@ const FALL_2026_BLOCK = {
 // Second sheet: one full body day of three supersets. Every set aims for
 // 10-15 reps; the sets themselves grow by week (week 1 one set, weeks 2-3
 // two, week 4 on three), which the athlete adds with "+ Set".
-const FULL_BODY_10_15_EXERCISES = [
+const CHRISTINA_FB_EXERCISES = [
   X('db-bench', 'Dumbbell bench press', 'push', 'upper'),
   X('back-squat', 'Back squat', 'squat', 'lower'),
   X('chin-up', 'Chin-up', 'pull', 'upper', false),
@@ -158,8 +158,8 @@ const SETS_10_15 = 'Week 1: 1 working set. Weeks 2-3: 2 sets. Week 4 on: 3 sets 
 const RULES_10_15 = 'Do 2-3 warm-up sets first. Fail before 10 reps: too heavy, count the set and drop the weight. 15 reps easily: call it a warm-up and go heavier. Hit 15 at a weight: add weight next week.';
 const ss = (group, exerciseId, demo, opts) => ({ ...it(exerciseId, 1, 10, { range: '10-15', ...opts, note: [opts.note, `Demo: ${demo}`].filter(Boolean).join('\n') }), group });
 
-const FULL_BODY_10_15_BLOCK = {
-  name: 'Full body 10-15',
+const CHRISTINA_FB_BLOCK = {
+  name: 'Christina FB',
   weeks: 8,
   deloadWeek: null,
   days: [
@@ -194,10 +194,10 @@ export const TEMPLATES = [
     exercises: FALL_2026_EXERCISES.filter((e) => warm().some((x) => x.exerciseId === e.id)),
   },
   {
-    id: 'full-body-10-15',
-    name: 'Full body 10-15',
+    id: 'christina-fb',
+    name: 'Christina FB',
     about: '1 day, 3 supersets (bench + squat, chin-up + RDL, Arnold press + Copenhagen), 10-15 reps at 1 RIR, adding a set in weeks 2 and 4.',
-    block: FULL_BODY_10_15_BLOCK,
-    exercises: FULL_BODY_10_15_EXERCISES,
+    block: CHRISTINA_FB_BLOCK,
+    exercises: CHRISTINA_FB_EXERCISES,
   },
 ];

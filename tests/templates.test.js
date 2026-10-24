@@ -35,8 +35,8 @@ test('the Fall 2026 warmup is its own template, left out of training totals', ()
   assert.equal(sessionTotals(s, ex, false).sets, 0);
 });
 
-test('Full body 10-15 is three supersets with demo links in the notes', () => {
-  const t = TEMPLATES.find((x) => x.id === 'full-body-10-15');
+test('Christina FB is three supersets with demo links in the notes', () => {
+  const t = TEMPLATES.find((x) => x.id === 'christina-fb');
   const s = buildSession(t.block, 0, 0, { maxes: {} });
   assert.deepEqual(s.items.map((x) => x.group), ['A', 'A', 'B', 'B', 'C', 'C']);
   const bench = s.items[0];
