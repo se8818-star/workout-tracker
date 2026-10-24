@@ -104,7 +104,7 @@ export function athlete(root, { id }) {
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
         const vids = l.entries.flatMap((e) => e.sets.map((s, j) => (videoFresh(s.video) ? `<button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ ${esc(ex[e.exerciseId]?.name || '')} · set ${j + 1}</button>` : ''))).join('');
-        return `<div class="log-item"><div class="row between"><span><b>${esc(l.name)}</b>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted">${fmtDate(l.date)}</span></div>
+        return `<div class="log-item"><div class="row between"><span><a class="log-open" href="#/athlete/${id}/${l.warmup ? 'warmup' : 'session'}/${l.date}"><b>${esc(l.name)}</b> ›</a>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted">${fmtDate(l.date)}</span></div>
           <p class="muted small">RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u} · ${fmt(t.contacts)} contacts${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
