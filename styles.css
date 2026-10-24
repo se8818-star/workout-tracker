@@ -503,3 +503,27 @@ button.last b { color: var(--track); white-space: nowrap; }
 .warn-text { color: var(--warn); font-weight: 600; }
 .danger-link { color: var(--danger); margin-top: 12px; }
 .assigned-note { border-left: 4px solid var(--track); padding: 6px 10px; background: var(--card); margin: 0 0 12px; }
+/* week tabs: tap a week to change its own sets, reps and weight */
+.week-tabs .day-tab { min-height: 38px; padding: 6px 12px; font-size: 0.9rem; }
+.day-tab.own { box-shadow: inset 0 -4px 0 var(--track); }
+.day-tab.on.own { box-shadow: 3px 3px 0 var(--track), inset 0 -4px 0 var(--track); }
+.stepper.wk-own .stepper-row, label.wk-own input { border-color: var(--track); box-shadow: inset 0 0 0 2px var(--track); }
+.stepper.wk-own > span, label.wk-own { color: var(--track); }
+.wk-note { margin: 6px 0 0; color: var(--muted); }
+.wk-note b { color: var(--track); }
+.wk-note .link { font: inherit; padding: 0; border: 0; background: none; text-decoration: underline; cursor: pointer; }
+/* "Change every week at once" */
+.prog-card { margin: 0 0 14px; }
+.prog-card summary { cursor: pointer; font: 800 1rem var(--head); font-stretch: 70%; text-transform: uppercase; }
+.prog-card textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.prog-row { margin: 10px 0 4px; align-items: center; }
+.prog-row select, .prog-row .dd-btn { width: auto; min-width: 180px; }
+.prog-read { border-left: 4px solid var(--track); background: #fff; padding: 8px 12px; margin-bottom: 12px; }
+.prog-read ul { margin: 4px 0 0; padding-left: 18px; }
+.prog-table-wrap { overflow-x: auto; border: var(--thin); background: #fff; }
+.prog-table { border-collapse: collapse; font: 500 0.7rem var(--mono); white-space: nowrap; }
+.prog-table th, .prog-table td { padding: 6px 8px; border-bottom: var(--hair); text-align: left; }
+.prog-table thead th { background: var(--ink); color: var(--paper); text-transform: uppercase; }
+.prog-table tbody th { position: sticky; left: 0; background: #fff; font: 700 0.8rem var(--body); border-right: var(--hair); }
+.prog-table tbody th small { display: block; font-weight: 400; color: var(--muted); }
+.prog-sheet .sheet { max-width: 760px; }
