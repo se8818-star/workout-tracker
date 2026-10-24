@@ -94,3 +94,100 @@ test('a rep range moves as a whole with "add 1 rep per week"', () => {
   const s = buildSession(r.block, 0, 2, {});
   assert.equal(s.items[0].sets[0].repsTo, 17);
 });
+
+// A two-day program with names, for sentences aimed at some of it.
+const named = () => ({ weeks: 8, deloadWeek: null, days: [
+  { name: 'Full body', items: [
+    { exerciseId: 'bench', sets: 1, reps: 10, repsTo: 15, weight: 100, unit: 'lb', group: 'A' },
+    { exerciseId: 'squat', sets: 1, reps: 10, repsTo: 15, weight: 150, unit: 'lb', group: 'A' },
+    { exerciseId: 'chin', sets: 1, reps: 10, group: 'B' },
+  ] },
+  { name: 'Legs 2', items: [
+    { exerciseId: 'fsquat', sets: 3, reps: 8, weight: 135, unit: 'lb' },
+    { exerciseId: 'curl', sets: 3, reps: 12, weight: 30, unit: 'lb', progression: { type: 'add_weight', step: 5 } },
+  ] },
+] });
+const NAMES_EX = { bench: { name: 'Dumbbell bench press' }, squat: { name: 'Back squat' }, chin: { name: 'Chin-up' }, fsquat: { name: 'Front squat' }, curl: { name: 'Seated leg curl' } };
+const sets = (b, di, ii) => Array.from({ length: b.weeks }, (_, w) => buildSession(b, di, w, {}, 5).items[ii].sets.length);
+const lbs = (b, di, ii) => Array.from({ length: b.weeks }, (_, w) => buildSession(b, di, w, {}, 5).items[ii].sets[0].weight);
+
+test('week ranges: "weeks 2-3: 2 sets. Week 4 on: 3 sets" on one day', () => {
+  const b = named();
+  const p = parseProgression('Weeks 2-3: 2 sets. Week 4 on: 3 sets.', b, NAMES_EX);
+  assert.equal(p.error, null);
+  assert.deepEqual(p.rules[0].weeks, { from: 2, to: 3 });
+  assert.deepEqual(p.rules[1].weeks, { from: 4, to: Infinity });
+  assert.deepEqual(describeRules(p.rules), ['Weeks 2–3: sets at 2.', 'From week 4: sets at 3.']);
+  const r = applyProgression(b, p.rules, [0]);
+  assert.deepEqual(sets(r.block, 0, 0), [1, 2, 2, 3, 3, 3, 3, 3]);
+  assert.deepEqual(sets(r.block, 0, 2), [1, 2, 2, 3, 3, 3, 3, 3]);
+  assert.deepEqual(sets(r.block, 1, 0), [3, 3, 3, 3, 3, 3, 3, 3]); // other day left alone
+});
+
+test('one exercise, from a week on; other weeks and other numbers stay', () => {
+  const b = named();
+  const p = parseProgression('From week 5, add 5 lb per week to bench', b, NAMES_EX);
+  assert.equal(p.error, null);
+  assert.deepEqual(p.rules[0].targets.items, ['0:0']);
+  assert.match(describeRules(p.rules)[0], /^From week 5, only Dumbbell bench press, each week: weight \+5 lb/);
+  const r = applyProgression(b, p.rules);
+  assert.deepEqual(r.changed, [{ di: 0, ii: 0 }]);
+  assert.deepEqual(lbs(r.block, 0, 0), [100, 100, 100, 100, 105, 110, 115, 120]);
+  assert.deepEqual(lbs(r.block, 0, 1), [150, 150, 150, 150, 150, 150, 150, 150]);
+});
+
+test('a one-off week goes back afterwards, and earlier commands survive later ones', () => {
+  let b = named();
+  b = applyProgression(b, parseProgression('Weeks 2-3: 2 sets. Week 4 on: 3 sets.', b, NAMES_EX).rules, [0]).block;
+  const p = parseProgression('Week 6: 4 sets for back squat', b, NAMES_EX);
+  assert.equal(p.error, null);
+  b = applyProgression(b, p.rules).block;
+  assert.deepEqual(sets(b, 0, 1), [1, 2, 2, 3, 3, 4, 3, 3]);
+  assert.deepEqual(sets(b, 0, 0), [1, 2, 2, 3, 3, 3, 3, 3]);
+});
+
+test('days, supersets and several exercises by name', () => {
+  const b = named();
+  const day = parseProgression('On Legs 2, add 1 rep each week until week 4', b, NAMES_EX);
+  assert.equal(day.error, null);
+  assert.deepEqual(day.rules[0].targets.days, [1]);
+  assert.deepEqual(day.rules[0].weeks, { from: 2, to: 4 });
+  const r = applyProgression(b, day.rules);
+  assert.deepEqual(r.changed.map((x) => x.di), [1, 1]);
+  const reps = Array.from({ length: 8 }, (_, w) => buildSession(r.block, 1, w, {}, 5).items[0].sets[0].reps);
+  assert.deepEqual(reps, [8, 9, 10, 11, 11, 11, 11, 11]); // the gains are kept after the weeks end
+  // The curl's own "+5 lb a week" isn't touched by a reps change.
+  assert.deepEqual(lbs(r.block, 1, 1).slice(0, 3), [30, 35, 40]);
+  const ss = parseProgression('Superset A: add a set in weeks 3 and 5', b, NAMES_EX);
+  assert.deepEqual(ss.rules[0].targets.groups, ['a']);
+  assert.deepEqual(applyProgression(b, ss.rules).changed.map((x) => x.ii), [0, 1]);
+  const two = parseProgression('add 10 lb every 2 weeks for bench and squats', b, NAMES_EX);
+  assert.deepEqual(two.rules[0].targets.items.sort(), ['0:0', '0:1', '1:0']);
+});
+
+test('a scoped weight change keeps the weeks its exercise\'s own rule already gave', () => {
+  const b = named();
+  const r = applyProgression(b, parseProgression('From week 4, add 10 lb per week to leg curl', b, NAMES_EX).rules);
+  assert.deepEqual(r.replaced, [{ di: 1, ii: 1 }]);
+  assert.deepEqual(lbs(r.block, 1, 1), [30, 35, 40, 50, 60, 70, 80, 90]);
+});
+
+test('scope mistakes are explained', () => {
+  const b = named();
+  assert.match(parseProgression('Week 1: 3 sets', b, NAMES_EX).error, /Week 1 is the starting point/);
+  assert.equal(parseProgression('Superset C: 3 sets', b, NAMES_EX).error, 'This program has no superset C.');
+  assert.equal(parseProgression('add 1 set on day 3', b, NAMES_EX).error, 'This program has no day 3.');
+  // Names the block doesn't have are not a scope: the sentence reads as before.
+  assert.equal(parseProgression('add 1 rep per week to everything', b, NAMES_EX).rules[0].targets, undefined);
+});
+
+test('a named week is a one-off; the weeks after go back', () => {
+  const b = named();
+  const p = parseProgression('Only Front squat: add 2 sets in week 6. Weeks 7 and 8: drop sets by 1 on front squat', b, NAMES_EX);
+  assert.equal(p.error, null);
+  assert.deepEqual(describeRules(p.rules), ['Week 6, only Front squat: sets +2.', 'Weeks 7, 8, only Front squat: sets −1.']);
+  const r = applyProgression(b, p.rules);
+  assert.deepEqual(sets(r.block, 1, 0), [3, 3, 3, 3, 3, 5, 2, 2]);
+  const both = parseProgression('add 1 set starting week 3 for chin-ups and the bench', b, NAMES_EX);
+  assert.deepEqual(both.rules[0].targets.labels, ['Chin-up', 'Dumbbell bench press']);
+});

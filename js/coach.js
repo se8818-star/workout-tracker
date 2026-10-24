@@ -326,7 +326,7 @@ function weekCell(item, b, w) {
 
 // Reads the coach's words, shows every week of what would change, and applies it on OK.
 function progressionSheet(b, text, scope, done) {
-  const p = parseProgression(text);
+  const p = parseProgression(text, b, store.exercisesById());
   if (p.error) return toast(p.error);
   const days = scope === '' ? null : [Number(scope)];
   const r = applyProgression(b, p.rules, days);
@@ -500,14 +500,14 @@ export function blockEditor(root, { id }, query) {
     </nav>
     <p class="muted small">${week ? `<b>Week ${week + 1}.</b> Sets, reps and weight you change here are for this week only (marked red). Exercises, notes and the order are the same every week.` : 'Week 1 is the starting point. The "each week" rules fill in the later weeks, and the deload week halves sets and drops load 10%. Tap a week to change its numbers.'} <span id="week-tot">${weekLine(weekTot)}</span></p>
     <details class="card prog-card" ${query.get('prog') ? 'open' : ''}><summary>Change every week at once</summary>
-      <p class="muted small">Describe the progression in your own words. You'll see every week before anything changes. Warmups are left alone.</p>
-      <textarea id="prog-text" rows="3" placeholder="Increase reps by 1 per week until reps = 15, then reset reps to 10 and increase weight by 10."></textarea>
+      <p class="muted small">Describe the progression in your own words, one change per line. Aim a line at some weeks, a day, a superset or exercises by naming them. You'll see every week before anything changes. Warmups are left alone.</p>
+      <textarea id="prog-text" rows="4" placeholder="Increase reps by 1 per week until reps = 15, then reset reps to 10 and increase weight by 10.&#10;Weeks 2-3: 2 sets. Week 4 on: 3 sets.&#10;From week 5, add 5 lb per week to bench and squat."></textarea>
       <div class="row gap wrap prog-row">
         <select id="prog-scope" aria-label="Which days"><option value="">Whole program</option>${b.days.map((d, di) => `<option value="${di}">Only ${esc(d.name || `Day ${di + 1}`)}</option>`).join('')}</select>
         <button class="btn" data-action="progPreview">Preview</button>
         ${b.days.some((d) => d.items.some((it) => it.byWeek)) ? '<button class="chip" data-action="progClear">Clear week changes</button>' : ''}
       </div>
-      <p class="muted small">Examples: "Add 1 rep per week up to 12 reps". "Add 5 lb each week". "Add a set every 2 weeks". "Add 2.5% per week". Weights without lb or kg use each exercise's own unit.</p>
+      <p class="muted small">Examples: "Add 1 rep per week up to 12 reps". "Add a set every 2 weeks". "Weeks 2-3: 2 sets". "From week 5, add 5 lb per week to bench". "On Upper, add 2.5% per week until week 6". "Superset A: 3 sets from week 4". "Week 6: drop sets by 1" (a named week is a one-off). Weights without lb or kg use each exercise's own unit.</p>
     </details>
     <nav class="day-tabs" aria-label="Days">
       ${b.days.map((d, di) => `<button class="day-tab ${di === day ? 'on' : ''} ${di === other ? 'side' : ''}" data-action="pickDay" data-di="${di}" aria-pressed="${di === day}">${esc(d.name || `Day ${di + 1}`)}</button>`).join('')}
