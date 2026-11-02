@@ -1,9 +1,10 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, sheet, closeSheet, demoSheet, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, PATTERN_LABEL, $ } from './ui.js';
+import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
@@ -89,7 +90,7 @@ export function athlete(root, { id }) {
       ${stat('Session load', w.load, null, ' AU')}
     </div>
     <section class="card"><h3>Programs</h3>
-      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap"><a class="chip" href="#/coach/assignment/${g.id}">Edit</a><button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
+      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap wrap">${w ? `<a class="chip" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="chip" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="chip" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
       <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
     </section>
     <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
@@ -268,7 +269,7 @@ function newItem(exId, warm) {
 // The numbers that change week to week. Week 1 is the item itself; later
 // weeks can override them in item.byWeek.
 const WEEK_KEYS = ['sets', 'reps', 'secs', 'pct', 'weight'];
-const hasOwn = (item, week) => WEEK_KEYS.some((k) => weekOverride(item, week, k) != null);
+const hasOwn = (item, week) => WEEK_KEYS.some((k) => weekOverride(item, week, k) != null) || offInWeek(item, week) || exerciseInWeek(item, week) !== item.exerciseId;
 
 // Sets an item's number for one week. A value that matches what the weekly
 // rule would give anyway isn't kept, so later rule changes still reach it.
@@ -312,7 +313,8 @@ function weekNumbers(item, b, week) {
 }
 
 function weekNote(item, b, wk) {
-  return hasOwn(item, wk) ? `<b>Week ${wk + 1} has its own numbers.</b> <button class="link" data-action="weekReset">Reset</button>`
+  const swap = exerciseInWeek(item, wk) !== item.exerciseId ? ` Week ${wk + 1} does <b>${esc(store.get('exercises', exerciseInWeek(item, wk))?.name || exerciseInWeek(item, wk))}</b> instead.` : '';
+  return hasOwn(item, wk) ? `<b>Week ${wk + 1} has its own numbers.</b>${swap} <button class="link" data-action="weekReset">Reset</button>`
     : `Week ${wk + 1}: from week 1${item.progression ? ' and the weekly rule' : ''}${b.deloadWeek === wk ? ', deload' : ''}. Change a number to set it for this week only.`;
 }
 
@@ -365,7 +367,9 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0) {
   const loadedEx = store.all('exercises').filter((e) => e.loaded).sort((a, b) => a.name.localeCompare(b.name));
   // Less-used settings stay folded away unless one is already in use.
   const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
-  return `<div class="item" data-di="${di}" data-ii="${ii}">
+  const off = !item.warmup && b && offInWeek(item, week);
+  return `<div class="item ${off ? 'item-off' : ''}" data-di="${di}" data-ii="${ii}">
+    ${off ? `<p class="wk-note small"><b>Left out of week ${week + 1}.</b> <button class="link" data-action="weekReset">Put back</button></p>` : ''}
     <div class="item-top">
       <span class="item-n">${esc(label)}</span>
       <button class="item-name" data-action="itemPick" title="Change exercise">${esc(x?.name || item.exerciseId)}</button>
@@ -950,6 +954,8 @@ export function assignmentEditor(root, { id }) {
       <button class="btn wide" data-action="save">Save schedule</button>
     </section>
     <section class="card"><h3>Exercises, sets and reps</h3>
+      ${warm ? '' : `<p class="muted small">Change ${esc(first)}'s exercises, sets and reps week by week, for just one week or the rest of the program.${others.length ? ` Only ${esc(first)} gets the changes.` : ''}</p>
+        <a class="btn" href="#/coach/assignment/${g.id}/plan">Change ${esc(first)}'s workouts</a><hr class="plan-sep">`}
       ${others.length ? `<p class="muted small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this ${warm ? 'warmup' : 'program'} too. Editing it changes it for everyone. Make a copy to change it just for ${esc(first)}.</p>
         <div class="row gap wrap"><button class="btn" data-action="copy">Make a copy just for ${esc(first)}</button><a class="btn ghost" href="#/coach/block/${b.id}">Edit for everyone</a></div>`
         : `<p class="muted small">Changes reach ${esc(first)}'s days that haven't been started. Finished workouts stay as logged.</p><a class="btn" href="#/coach/block/${b.id}">Edit ${warm ? 'warmup' : 'program'}</a>`}
@@ -970,11 +976,198 @@ export function assignmentEditor(root, { id }) {
     },
     copy: () => {
       const c = structuredClone(b);
-      c.id = store.uid('block'); c.name = `${b.name} (${first})`;
+      c.id = store.uid('block'); c.name = `${b.name} (${first})`; c.copiedFrom = b.id;
       store.put('blocks', c);
       store.put('assignments', { ...g, blockId: c.id });
       toast(`Copied. Changes here only reach ${first}.`);
       location.hash = `#/coach/block/${c.id}`;
     },
   });
+}
+
+// ---------- change one athlete's program, week by week ----------
+
+// The program week an assignment is in today (0-based, kept inside the block).
+function weekNow(g, b) {
+  const w = Math.floor(daysBetween(g.startDate, today()) / 7);
+  return Math.max(0, Math.min(b.weeks - 1, w));
+}
+
+// The block to change for this athlete. When others are on the same program
+// they keep the original: this athlete gets their own copy first.
+function ownBlock(g, b, a) {
+  const shared = store.all('assignments').some((x) => x.blockId === b.id && x.id !== g.id);
+  if (!shared) return b;
+  const c = structuredClone(b);
+  c.id = store.uid('block'); c.name = `${b.name} (${a.name.split(' ')[0]})`; c.copiedFrom = b.id;
+  store.put('blocks', c);
+  store.put('assignments', { ...g, blockId: c.id });
+  return c;
+}
+
+// "3 × 8–10 · 75%", or "Check off".
+function planNums(v, unit) {
+  if (v.measure === 'none') return 'Check off';
+  let t = `${v.sets} × ${v.measure === 'time' ? `${v.secs} s` : `${repsText(v.reps, v.repsTo)}${v.measure === 'breaths' ? ' breaths' : ''}`}`;
+  if (v.pct != null) t += ` · ${v.pct}%`;
+  else if (v.weight != null) t += ` · ${fmt(store.showW(v.weight, unit), 1)} ${unit}`;
+  return t;
+}
+
+export function assignmentPlan(root, { id }, query) {
+  const g = store.get('assignments', id);
+  const b = g && store.get('blocks', g.blockId);
+  const a = g && store.get('athletes', g.athleteId);
+  if (!g || !b || !a || isWarmup(b)) { root.innerHTML = '<p class="empty">Program not found.</p>'; return; }
+  const first = a.name.split(' ')[0];
+  const now = weekNow(g, b);
+  const week = Math.max(0, Math.min(b.weeks - 1, query.get('w') == null ? now : Number(query.get('w'))));
+  const day = Math.max(0, Math.min(b.days.length - 1, Number(query.get('day') || 0)));
+  const ex = store.exercisesById();
+  const others = store.all('assignments').filter((x) => x.blockId === b.id && x.id !== g.id).map((x) => store.get('athletes', x.athleteId)?.name).filter(Boolean);
+  const go = (w = week, d = day) => { location.hash = `#/coach/assignment/${id}/plan?w=${w}&day=${d}`; };
+  const items = b.days[day].items.map((it, ii) => ({ it, ii })).filter(({ it }) => !it.warmup);
+  let n = 0;
+  root.innerHTML = `
+    <header class="page-head"><a class="back" href="#/coach/athlete/${a.id}">‹ ${esc(a.name)}</a>
+      <span class="kicker">${esc(first)}'s program</span><h1>${esc(b.name)}</h1>
+      <p class="muted small">Change exercises, sets and reps right here. After each change you pick: just this week, or this week to the end. Workouts ${esc(first)} already finished stay as logged.</p></header>
+    ${others.length ? `<p class="assigned-note small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this program too. Your first change makes a copy just for ${esc(first)}, so they keep theirs.</p>` : ''}
+    <nav class="day-tabs week-tabs" aria-label="Weeks">
+      ${Array.from({ length: b.weeks }, (_, w) => `<button class="day-tab ${w === week ? 'on' : ''} ${w === now ? 'now' : ''}" data-action="pickWeek" data-w="${w}" aria-pressed="${w === week}">Wk ${w + 1}${b.deloadWeek === w ? ' · D' : ''}</button>`).join('')}
+    </nav>
+    ${b.days.length > 1 ? `<nav class="day-tabs" aria-label="Days">${b.days.map((d, di) => `<button class="day-tab ${di === day ? 'on' : ''}" data-action="pickDay" data-d="${di}" aria-pressed="${di === day}">${esc(d.name || `Day ${di + 1}`)}</button>`).join('')}</nav>` : ''}
+    ${items.map(({ it, ii }) => {
+      const v = weekView(it, b, week);
+      const x = ex[v.exerciseId];
+      const label = v.off ? '–' : it.group || String(++n);
+      return `<div class="card plan-item ${v.off ? 'off' : ''}" data-ii="${ii}">
+        <span class="item-n">${esc(label)}</span>
+        <div><h3>${esc(x?.name || v.exerciseId)}</h3>
+          <p class="plan-nums ${v.off ? 'muted' : ''}">${v.off ? `Not in week ${week + 1}` : esc(planNums(v, it.unit || store.unit()))}</p></div>
+        <div class="plan-acts">${v.off ? '<button class="chip" data-action="putBack">Put back</button>'
+          : '<button class="chip" data-action="change">Change</button><button class="chip" data-action="remove">Remove</button>'}</div></div>`;
+    }).join('') || '<p class="muted">No exercises on this day.</p>'}
+    <button class="btn ghost wide" data-action="add">+ Add an exercise</button>
+    <p class="muted small">Warmups, notes and tempo stay in the <a class="link" href="#/coach/block/${b.id}?w=${week}&day=${day}">full program editor</a>. Days and dates: <a class="link" href="#/coach/assignment/${id}">schedule</a>.</p>`;
+
+  // Asks how far the change reaches, then saves it to this athlete's program.
+  const apply = async (what, fn) => {
+    let scope = 'week';
+    if (week < b.weeks - 1) {
+      const msg = `${what}${others.length ? ` Only ${first} gets this; ${others.join(', ')} stay${others.length > 1 ? '' : 's'} on the original.` : ''}`;
+      scope = await choose('How long should this last?', msg, [
+        { v: 'week', label: `Just week ${week + 1}`, sub: `Week ${week + 2} on stays as it was` },
+        { v: 'rest', label: `Rest of the program`, sub: `Weeks ${week + 1} to ${b.weeks}` },
+      ]);
+      if (!scope) return;
+    }
+    const mine = ownBlock(g, b, a);
+    store.put('blocks', fn(mine, scope));
+    toast(`${scope === 'week' ? `Changed for week ${week + 1}` : `Changed from week ${week + 1} on`}${mine.id !== b.id ? `, in ${first}'s own copy` : ''}`);
+    plan();
+  };
+  const plan = () => assignmentPlan(root, { id }, query);
+  const iiOf = (el) => Number(el.closest('[data-ii]').dataset.ii);
+  const exName = (exId) => store.get('exercises', exId)?.name || exId;
+
+  bindActions(root, {
+    pickWeek: (el) => go(Number(el.dataset.w), day),
+    pickDay: (el) => go(week, Number(el.dataset.d)),
+    remove: (el) => { const ii = iiOf(el); apply(`Take out ${exName(weekView(b.days[day].items[ii], b, week).exerciseId)}.`, (blk, scope) => removeItem(blk, day, ii, week, scope)); },
+    putBack: (el) => { const ii = iiOf(el); apply(`Put ${exName(weekView(b.days[day].items[ii], b, week).exerciseId)} back in.`, (blk, scope) => restoreItem(blk, day, ii, week, scope)); },
+    add: () => pickExerciseSheet((exId) => {
+      const it = newItem(exId, false);
+      it.unit = store.unit();
+      changeSheet(it, { ...weekView(it, { ...b, deloadWeek: null }, 0) }, 'Add', (vals) => {
+        const item = { ...it, exerciseId: vals.exerciseId, sets: vals.sets ?? it.sets, ...(vals.reps ? { reps: vals.reps.reps, ...(vals.reps.repsTo != null ? { repsTo: vals.reps.repsTo } : {}) } : {}),
+          ...(vals.secs != null ? { secs: vals.secs } : {}), ...(vals.pct != null ? { pct: vals.pct } : {}), ...(vals.weight != null ? { weight: vals.weight } : {}) };
+        if (item.repsTo == null) delete item.repsTo;
+        apply(`Add ${exName(vals.exerciseId)}.`, (blk, scope) => addItem(blk, day, item, week, scope));
+      });
+    }, { allowNew: true }),
+    change: (el) => {
+      const ii = iiOf(el), it = b.days[day].items[ii], v = weekView(it, b, week);
+      changeSheet(it, v, 'Next', (vals) => {
+        const change = {};
+        for (const k of ['exerciseId', 'sets', 'secs', 'pct', 'weight']) if (vals[k] != null && vals[k] !== v[k]) change[k] = vals[k];
+        if (vals.reps && (vals.reps.reps !== v.reps || (vals.reps.repsTo ?? null) !== (v.repsTo ?? null))) change.reps = vals.reps;
+        if (!Object.keys(change).length) return toast('Nothing changed');
+        const bits = [];
+        if (change.exerciseId) bits.push(`${exName(v.exerciseId)} → ${exName(change.exerciseId)}`);
+        const after = { ...v, ...change, ...(change.reps || {}) };
+        if (Object.keys(change).some((k) => k !== 'exerciseId')) bits.push(`${planNums(v, it.unit || store.unit())} → ${planNums(after, it.unit || store.unit())}`);
+        apply(`${bits.join('. ')}.`, (blk, scope) => changeItem(blk, day, ii, week, change, scope));
+      });
+    },
+  });
+}
+
+// The change panel for one exercise in one week: swap it, sets, reps (or
+// seconds), and the % of max or weight. Calls done(values) on save.
+function changeSheet(item, v, okLabel, done, state = null) {
+  const s = state || { exerciseId: v.exerciseId, sets: v.sets, reps: repsText(v.reps, v.repsTo, '-'), secs: v.secs, pct: v.pct, weight: v.weight };
+  const iu = item.unit || store.unit();
+  const m = v.measure;
+  const num = (label, k, val, step, min) => `<div class="stepper"><span>${label}</span><div class="stepper-row">
+    <button class="step-btn" type="button" data-step="${k}" data-d="${-step}" aria-label="Less ${label.toLowerCase()}">−</button>
+    <input type="number" inputmode="decimal" min="${min}" step="any" name="${k}" value="${val ?? ''}" aria-label="${label}">
+    <button class="step-btn" type="button" data-step="${k}" data-d="${step}" aria-label="More ${label.toLowerCase()}">+</button></div></div>`;
+  const html = `<form class="plan-fields">
+    <div class="plan-ex"><b>${esc(store.get('exercises', s.exerciseId)?.name || s.exerciseId)}</b><button type="button" class="chip" data-swap>Swap exercise</button></div>
+    ${m === 'none' ? '<p class="muted small">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
+      ${num('Sets', 'sets', s.sets, 1, 1)}<span class="times" aria-hidden="true">×</span>
+      ${m === 'time' ? num('Seconds', 'secs', s.secs, 5, 0) : `<div class="stepper reps-stepper"><span>${m === 'breaths' ? 'Breaths' : 'Reps'}</span><div class="stepper-row">
+        <button class="step-btn" type="button" data-step="reps" data-d="-1" aria-label="Fewer">−</button>
+        <input type="text" name="reps" autocomplete="off" placeholder="10-15" value="${esc(s.reps)}" aria-label="Reps, one number or a range like 10-15">
+        <button class="step-btn" type="button" data-step="reps" data-d="1" aria-label="More">+</button></div></div>`}</div>
+      ${v.pct != null ? num('% of max', 'pct', s.pct, 2.5, 0) : ''}
+      ${v.weight != null ? num(`Weight (${iu})`, 'weight', store.showW(s.weight, iu) ?? '', iu === 'kg' ? 2.5 : 5, 0) : ''}`}
+    <div class="ask-btns"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn">${esc(okLabel)}</button></div></form>`;
+  const wrap = sheet(store.get('exercises', v.exerciseId)?.name || 'Change exercise', html, (w) => {
+    const f = w.querySelector('form');
+    const read = () => {
+      const val = (k) => (f.elements[k] && f.elements[k].value !== '' ? Number(f.elements[k].value) : null);
+      if (f.elements.sets) s.sets = val('sets');
+      if (f.elements.secs) s.secs = val('secs');
+      if (f.elements.pct) s.pct = val('pct');
+      // The weight is kept in lb: only read it back if the box was changed.
+      const wb = f.elements.weight;
+      if (wb && wb.value !== String(store.showW(s.weight, iu) ?? '')) s.weight = wb.value === '' ? null : store.readW(Number(wb.value), iu);
+      if (f.elements.reps) s.reps = f.elements.reps.value.trim();
+    };
+    w.addEventListener('click', (e) => {
+      const st = e.target.closest('[data-step]');
+      if (st) {
+        const k = st.dataset.step, d = Number(st.dataset.d), box = f.elements[k];
+        if (k === 'reps') {
+          const r = parseReps(box.value) || { reps: 0, repsTo: null };
+          const lo = Math.max(0, (r.reps || 0) + d);
+          box.value = repsText(lo, r.repsTo != null ? Math.max(lo, r.repsTo + d) : null, '-');
+        } else box.value = Math.max(Number(box.min) || 0, Math.round(((Number(box.value) || 0) + d) * 100) / 100);
+        return;
+      }
+      if (e.target.closest('[data-swap]')) { read(); pickExerciseSheet((exId) => { s.exerciseId = exId; changeSheet(item, v, okLabel, done, s); }); }
+    });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      read();
+      const out = { exerciseId: s.exerciseId };
+      if (m !== 'none') {
+        if (!s.sets || s.sets < 1) return toast('Sets must be at least 1');
+        out.sets = Math.round(s.sets);
+        if (m === 'time') out.secs = s.secs ?? 0;
+        else {
+          const r = parseReps(s.reps);
+          if (!r || r.reps == null) return toast('Reps: one number or a range like 10-15');
+          out.reps = r;
+        }
+        if (v.pct != null && s.pct != null) out.pct = s.pct;
+        if (v.weight != null && s.weight != null) out.weight = Math.round(s.weight * 100) / 100;
+      }
+      closeSheet();
+      done(out);
+    });
+  });
+  wrap.classList.add('ask');
 }
