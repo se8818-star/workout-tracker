@@ -365,11 +365,19 @@ button.last b { color: var(--track); white-space: nowrap; font-weight: 650; }
 .note-field[hidden] { display: none; }
 .note-field span { display: block; font-size: 0.85rem; font-weight: 650; color: var(--muted); margin-bottom: 4px; }
 .finish { margin-top: 24px; }
+/* Pinned Finish button: docked right on top of the tab bar, in the same
+   frosted bar, so it reads as part of the bottom chrome (no cards peeking
+   through a gap). Only shown while the workout is unfinished. */
 .finish-bar {
-  position: sticky; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 7; margin: 18px 0 0; padding: 10px 0 0;
-  background: linear-gradient(transparent, var(--paper) 35%);
+  position: sticky; bottom: calc(59px + env(safe-area-inset-bottom)); z-index: 7; margin: 18px -16px 0; padding: 10px 16px;
+  background: var(--bar-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--line);
 }
 .finish-bar .btn { width: 100%; }
+.finished-card { margin-top: 18px; display: grid; gap: 10px; }
+.finished-card p { margin: 0; }
+.finished-card .btn { width: 100%; }
+.fc-head { display: flex; align-items: center; gap: 10px; font-size: 1.02rem; }
+.fc-check { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--turf-soft); color: var(--turf); font-weight: 800; font-size: 0.9rem; }
 .rpe { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin: 12px 0; }
 .rpe button { min-height: var(--tap); background: var(--fill); border-radius: 8px; font-weight: 700; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
 .rpe button.on { background: var(--ink); color: var(--paper); }
@@ -656,7 +664,9 @@ button.last b { color: var(--track); white-space: nowrap; font-weight: 650; }
 
 @media (min-width: 900px) {
   .tabbar { left: 50%; transform: translateX(-50%); max-width: 480px; bottom: 16px; border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 0 6px; }
-  .finish-bar { bottom: 96px; }
+  /* Laptop: the tab bar is a floating pill, so the Finish bar becomes a
+     matching pill sitting just above it. */
+  .finish-bar { bottom: 88px; max-width: 480px; margin: 18px auto 0; padding: 8px; border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
 }
 .tbl.compact th, .tbl.compact td { padding: 8px 6px; }
 .tbl.compact td:first-child { min-width: 96px; }
