@@ -95,7 +95,7 @@ function render(keepScroll = false) {
 function home(root) {
   const athletes = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1>
+    <header class="page-head hero"><h1>Chunky Training</h1>
       <p class="muted">Demo mode: everything is saved on this device. Pick who you are to try it.</p></header>
     <section class="card">
       <h3>I'm the coach</h3>
