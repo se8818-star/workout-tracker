@@ -40,6 +40,64 @@ export function e1rm(weight, reps) {
   return weight * (1 + reps / 30);
 }
 
+// ---------- maxes from logged lifts ----------
+// An athlete's max for an exercise is estimated from their ticked sets with
+// the rep-max formula above. Sets of more than EST_MAX_REPS reps guess the max
+// poorly, so they're left out. A set more than TYPO_JUMP times its target
+// weight is most likely a typo (2250 for 225) and is skipped.
+export const EST_MAX_REPS = 12;
+export const TYPO_JUMP = 1.5;
+
+const setEstimate = (s) => (s.done && s.weight > 0 && s.reps >= 1 && s.reps <= EST_MAX_REPS ? e1rm(s.weight, s.reps) : 0);
+const looksLikeTypo = (s) => s.targetWeight > 0 && s.weight > s.targetWeight * TYPO_JUMP;
+
+// Best estimate per exercise across logs: { [exerciseId]: {est, weight, reps,
+// date, typo} }. `after` maps an exercise to a date: only later sets count
+// (used after a coach clears a max). Typo sets are only reported when
+// `withTypos` is set, and never beat a real set.
+export function estimateMaxes(logs, { after = {}, withTypos = false } = {}) {
+  const out = {};
+  for (const l of logs) {
+    if (l.warmup) continue;
+    for (const e of l.entries || []) {
+      if (after[e.exerciseId] && l.date <= after[e.exerciseId]) continue;
+      for (const s of e.sets || []) {
+        const est = setEstimate(s);
+        if (!est) continue;
+        const typo = looksLikeTypo(s);
+        if (typo && !withTypos) continue;
+        const cur = out[e.exerciseId];
+        if (!cur || (cur.typo && !typo) || (cur.typo === typo && est > cur.est)) {
+          out[e.exerciseId] = { est: Math.round(est * 10) / 10, weight: s.weight, reps: s.reps, date: l.date, typo };
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Applies estimates to athlete.maxes (in place). An exercise with no max gets
+// one; a max is raised when beaten, unless the jump is over `jump` times it
+// (then it's flagged for the coach). `onlyMissing` leaves existing maxes
+// alone. athlete.maxInfo[id] says where each max came from:
+// {est: true, weight, reps, date} for an estimate, nothing for a typed one.
+export function applyEstimates(athlete, ests, { jump = 1.2, onlyMissing = false } = {}) {
+  const res = { added: [], raised: [], flagged: [] };
+  athlete.maxes ||= {};
+  for (const [id, e] of Object.entries(ests)) {
+    const cur = athlete.maxes[id];
+    if (cur && (onlyMissing || e.est <= cur)) continue;
+    if (e.typo || (cur && e.est > cur * jump)) { res.flagged.push({ exerciseId: id, est: Math.round(e.est) }); continue; }
+    athlete.maxes[id] = e.est;
+    athlete.maxInfo = { ...athlete.maxInfo, [id]: { est: true, weight: e.weight, reps: e.reps, date: e.date } };
+    res[cur ? 'raised' : 'added'].push(id);
+  }
+  return res;
+}
+
+// Exercises whose max the coach removed: estimates only use sets after that.
+export const clearedAfter = (athlete) => Object.fromEntries(Object.entries(athlete?.maxInfo || {}).filter(([, v]) => v?.cleared).map(([k, v]) => [k, v.cleared]));
+
 // Weeks are 0-based. A deload week cuts sets in half and load by 10%.
 export function isDeload(block, week) {
   return block.deloadWeek != null && block.deloadWeek === week;

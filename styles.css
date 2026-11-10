@@ -308,6 +308,7 @@ button.last b { color: var(--track); white-space: nowrap; }
 .log-item { padding: 12px 0; border-bottom: var(--hair); }
 .log-item:last-child { border-bottom: 0; }
 .max-grid .field-row > span { flex-basis: 60%; }
+.max-src { display: block; margin-top: 2px; font-family: var(--body, inherit); font-size: 0.72rem; font-weight: 400; text-transform: none; letter-spacing: 0; }
 
 /* block builder */
 .title-input {
