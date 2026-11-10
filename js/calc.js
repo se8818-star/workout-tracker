@@ -420,6 +420,22 @@ export function weekStart(iso) {
   return toISO(d);
 }
 
+// A workout with real work in it: finished, or at least one set ticked off.
+// Athletes often tick every set and close the app without tapping Finish, so
+// the coach's pages count these too.
+export function loggedWork(log) {
+  return Boolean(log && (log.finished || (log.entries || []).some((e) => (e.sets || []).some((s) => s.done))));
+}
+
+// Where an assignment stands on a date: 'upcoming', 'current' or 'ended'.
+// A program also ends once all its weeks have gone by.
+export function assignmentStatus(assignment, block, iso) {
+  if (iso < assignment.startDate) return 'upcoming';
+  if (assignment.endDate && iso > assignment.endDate) return 'ended';
+  if (block && block.kind !== 'warmup' && daysBetween(assignment.startDate, iso) >= block.weeks * 7) return 'ended';
+  return 'current';
+}
+
 // Nothing logged yet: no ticks, numbers, notes or session details.
 export function untouchedLog(log) {
   return !log.finished && log.sessionRpe == null && log.minutes == null && !log.note && log.entries.every(untouchedEntry);

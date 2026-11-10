@@ -63,3 +63,17 @@ test('an untouched day with no program left is dropped, a picked one stays', () 
   picked.chosen = true; store.saveLog(picked);
   assert.ok(store.currentLog('a', '2026-10-20'));
 });
+
+test('the program started last is the active one, and overlapping days follow it', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('old', 'Old'));
+  store.put('blocks', blockOf('new', 'New'));
+  store.put('assignments', { id: 'g-new', athleteId: 'a', blockId: 'new', startDate: '2026-11-02', weekdays: [0] });
+  store.put('assignments', { id: 'g-old', athleteId: 'a', blockId: 'old', startDate: '2026-10-19', weekdays: [0] });
+  assert.equal(store.activeProgram('a', '2026-11-10').assignment.id, 'g-new');
+  assert.equal(store.activeProgram('a', '2026-11-10').week, 1);
+  assert.equal(store.plannedOn('a', '2026-11-09')[0].block.id, 'new');
+  assert.equal(store.activeProgram('a', '2026-10-27').assignment.id, 'g-old');
+  // Both programs have run all their weeks: nothing active.
+  assert.equal(store.activeProgram('a', '2027-01-04'), null);
+});

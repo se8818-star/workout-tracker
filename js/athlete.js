@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -233,6 +233,33 @@ export function session(root, { id, date, warm = false }) {
   const unitOf = (i, j) => log.entries[i].sets[j].unit || log.entries[i].unit || store.unit();
   const markEntry = (i) => root.querySelector(`#entry-${i}`)?.classList.toggle('complete', log.entries[i].sets.every((s) => s.done));
 
+  // Saves the workout as finished and updates maxes. `auto` is when the last
+  // set was just ticked: the workout finishes by itself (RPE and minutes are
+  // optional) and the athlete stays on the page.
+  const complete = (auto = false) => {
+    log.finished = true;
+    // Update maxes when a logged set beats the estimated 1RM on file. A jump
+    // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
+    // left for the coach to confirm instead of changing every future load.
+    const prs = [], odd = [];
+    delete log.maxFlags;
+    for (const e of log.entries) {
+      const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
+      const cur = athlete.maxes?.[e.exerciseId];
+      if (!cur || best <= cur) continue;
+      const name = store.get('exercises', e.exerciseId)?.name;
+      if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
+      athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
+    }
+    if (prs.length) store.put('athletes', athlete);
+    store.saveLog(log);
+    const done = auto ? `All sets done, ${warm ? 'warmup' : 'workout'} finished` : warm ? 'Warmup saved' : 'Workout saved';
+    toast(odd.length ? `${done}. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
+      : prs.length ? `${done}. New estimated max: ${prs.join(', ')}` : done);
+    if (auto) rerender(); else location.hash = `#/athlete/${id}?d=${date}`;
+  };
+  const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
+
   bindActions(root, {
     toggleSet: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
@@ -250,6 +277,7 @@ export function session(root, { id, date, warm = false }) {
       el.closest('.set').classList.toggle('done', s.done);
       markEntry(el.dataset.i);
       persist();
+      if (s.done && !log.finished && allDone()) complete(true);
     },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
@@ -279,27 +307,7 @@ export function session(root, { id, date, warm = false }) {
     },
     minutes: (el) => { log.minutes = el.value === '' ? null : Number(el.value); persist(); },
     sessionNote: (el) => { log.note = el.value; persist(); },
-    finish: () => {
-      log.finished = true;
-      // Update maxes when a logged set beats the estimated 1RM on file. A jump
-      // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
-      // left for the coach to confirm instead of changing every future load.
-      const prs = [], odd = [];
-      delete log.maxFlags;
-      for (const e of log.entries) {
-        const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
-        const cur = athlete.maxes?.[e.exerciseId];
-        if (!cur || best <= cur) continue;
-        const name = store.get('exercises', e.exerciseId)?.name;
-        if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
-        athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
-      }
-      if (prs.length) store.put('athletes', athlete);
-      store.saveLog(log);
-      toast(odd.length ? `Saved. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
-        : prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : warm ? 'Warmup saved' : 'Workout saved');
-      location.hash = `#/athlete/${id}?d=${date}`;
-    },
+    finish: () => complete(),
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
     editEntry: (el) => editEntrySheet(log.entries[el.dataset.i], () => { persist(); rerender(); }),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
@@ -589,7 +597,7 @@ export function week(root, { id }, query) {
 }
 
 export function history(root, { id }) {
-  const logs = store.logsFor(id).filter((l) => l.finished && !l.warmup).reverse();
+  const logs = store.logsFor(id).filter((l) => loggedWork(l) && !l.warmup).reverse();
   const ex = store.exercisesById();
   const u = store.unit();
   const athlete = store.get('athletes', id);
@@ -601,8 +609,8 @@ export function history(root, { id }) {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
       return `<a class="card log-row" href="#/athlete/${id}/session/${l.date}">
-        <div><b>${esc(l.name)}</b><p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
+        <div><b>${esc(l.name)}</b>${l.finished ? '' : ' <small class="muted">not finished</small>'}<p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
         <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
-    }).join('') || '<p class="empty">No finished sessions yet.</p>'}`;
+    }).join('') || '<p class="empty">No logged sessions yet.</p>'}`;
 }

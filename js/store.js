@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -124,8 +124,22 @@ export function reset() { db = blank(); if (demo) seedDemo(); save(); }
 
 // ---- queries ----
 
+// Newest start date first, so when two programs overlap the one assigned for
+// the later start wins the day, the same on every device.
 export function assignmentsFor(athleteId) {
-  return all('assignments').filter((a) => a.athleteId === athleteId);
+  return all('assignments').filter((a) => a.athleteId === athleteId)
+    .sort((x, y) => (y.startDate || '').localeCompare(x.startDate || '') || x.id.localeCompare(y.id));
+}
+
+// The program an athlete is actively on: the running program they'd be shown
+// on a training day (see plannedOn). Returns {assignment, block, week} or null.
+export function activeProgram(athleteId, iso) {
+  for (const a of assignmentsFor(athleteId)) {
+    const block = get('blocks', a.blockId);
+    if (!block || block.kind === 'warmup' || assignmentStatus(a, block, iso) !== 'current') continue;
+    return { assignment: a, block, week: Math.floor(daysBetween(a.startDate, iso) / 7) };
+  }
+  return null;
 }
 
 // What is planned for an athlete on a date: [{assignment, block, week, dayIndex}]
@@ -159,11 +173,11 @@ export function logsFor(athleteId) {
   return all('logs').filter((l) => l.athleteId === athleteId).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Every finished session where the athlete logged sets of an exercise before
-// a date, newest first: [{date, unit, sets, note}].
+// Every earlier session where the athlete ticked sets of an exercise, finished
+// or not (only ticked sets count), newest first: [{date, unit, sets, note}].
 export function exerciseHistory(athleteId, exerciseId, beforeIso) {
   const out = [];
-  for (const l of logsFor(athleteId).filter((x) => x.date < beforeIso && x.finished).reverse()) {
+  for (const l of logsFor(athleteId).filter((x) => x.date < beforeIso).reverse()) {
     for (const e of l.entries.filter((x) => x.exerciseId === exerciseId)) {
       const done = e.sets.filter((x) => x.done);
       if (done.length) out.push({ date: l.date, unit: e.unit, measure: e.measure || 'reps', sets: done, note: e.athleteNote || '' });

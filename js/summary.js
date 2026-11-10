@@ -1,7 +1,7 @@
 // Weekly roll-ups for one athlete: planned vs done, built from store + calc.
 
 import * as store from './store.js';
-import { addDays, buildSession, sessionTotals, addTotals, emptyTotals, sessionLoad, tagPctOfMax } from './calc.js';
+import { addDays, buildSession, sessionTotals, addTotals, emptyTotals, sessionLoad, tagPctOfMax, loggedWork } from './calc.js';
 
 export function weekSummary(athleteId, monday) {
   const ex = store.exercisesById();
@@ -12,7 +12,9 @@ export function weekSummary(athleteId, monday) {
   const days = [];
   for (let i = 0; i < 7; i++) {
     const iso = addDays(monday, i);
-    const plans = store.plannedOn(athleteId, iso);
+    // The athlete is shown one program a day (the newest when two overlap),
+    // so only that one counts as planned.
+    const plans = store.plannedOn(athleteId, iso).slice(0, 1);
     for (const p of plans) {
       const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.roundStep());
       s.items = s.items.map((it) => tagPctOfMax(it, athlete, ex));
@@ -24,7 +26,8 @@ export function weekSummary(athleteId, monday) {
     if (log) {
       dayTotals = sessionTotals(log, ex, true);
       done = addTotals(done, dayTotals);
-      if (log.finished) { sessionsDone++; load += sessionLoad(log); }
+      // Ticked sets count as a session done even if Finish wasn't tapped.
+      if (loggedWork(log)) { sessionsDone++; load += sessionLoad(log); }
     }
     days.push({ iso, planned: plans.length > 0, log, totals: dayTotals });
   }
@@ -38,7 +41,7 @@ export function loadTrend(athleteId, todayIso) {
   // The ratio means little until there are about three weeks of history.
   const enough = logs.length && Math.round((new Date(todayIso) - new Date(logs[0].date)) / 86400000) >= 21;
   for (const l of logs) {
-    if (!l.finished || l.warmup || l.date > todayIso) continue;
+    if (!loggedWork(l) || l.warmup || l.date > todayIso) continue;
     const age = Math.round((new Date(todayIso) - new Date(l.date)) / 86400000);
     if (age < 7) acute += sessionLoad(l);
     if (age < 28) chronic += sessionLoad(l);
