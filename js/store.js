@@ -17,6 +17,7 @@ function blank() {
 }
 
 function save() {
+  logIndex = null;
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { /* private mode: keep in memory */ }
   for (const fn of listeners) fn();
 }
@@ -27,6 +28,7 @@ let demo = true;
 export function load({ cloud = false } = {}) {
   demo = !cloud;
   KEY = cloud ? 'wt-cloud-v1' : 'wt-db-v1';
+  logIndex = null;
   try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { db = null; }
   if (!db) { db = blank(); if (demo) seedDemo(); }
   db.dirty ||= {};
@@ -40,6 +42,7 @@ export const isDemo = () => demo;
 // as echoes, and re-rendering for those would wipe whatever is being typed).
 export function applyRemote(kind, id, data) {
   if (!db[kind]) return false;
+  if (kind === 'logs') logIndex = null;
   if (db.dirty[`${kind}/${id}`]) {
     // A local edit is waiting to upload; it wins, except that a workout
     // finished on another device beats an unfinished copy here.
@@ -169,8 +172,17 @@ export function logFor(athleteId, iso) { return get('logs', logId(athleteId, iso
 // The warmup is logged on its own, next to the day's workout.
 export function warmupLogFor(athleteId, iso) { return get('logs', `${logId(athleteId, iso)}:warmup`); }
 
+// Each athlete's logs, oldest first. Pages ask for these many times over (the
+// coach's Team page does for every athlete), so they're grouped once and the
+// grouping is dropped whenever a log changes.
+let logIndex = null;
 export function logsFor(athleteId) {
-  return all('logs').filter((l) => l.athleteId === athleteId).sort((a, b) => a.date.localeCompare(b.date));
+  if (!logIndex) {
+    logIndex = new Map();
+    for (const l of all('logs')) { if (!logIndex.has(l.athleteId)) logIndex.set(l.athleteId, []); logIndex.get(l.athleteId).push(l); }
+    for (const list of logIndex.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  return (logIndex.get(athleteId) || []).slice();
 }
 
 // Every earlier session where the athlete ticked sets of an exercise, finished
@@ -227,6 +239,12 @@ export function startLog(athleteId, iso, plan) {
     entries: sessionEntries(s, unit()),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
+}
+
+// What a planned day would hold if opened now, without saving a log (Today's preview).
+export function previewEntries(athleteId, iso, plan) {
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, get('athletes', athleteId), roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
+  return s ? sessionEntries(s, unit()) : [];
 }
 
 export function startWarmupLog(athleteId, iso, w) {

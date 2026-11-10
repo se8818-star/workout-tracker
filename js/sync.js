@@ -204,7 +204,7 @@ function loginView(root, mode = 'signin', sentTo = '') {
         <button class="link" data-action="mode" data-v="code">Forgot password? Sign in with an email code</button>`;
   }
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1></header>
+    <header class="page-head hero"><h1>Chunky Training</h1></header>
     <div class="seg auth-tabs" role="tablist">${tab('signin', 'Sign in')}${tab('create', 'Create account')}</div>
     <section class="card form">${body}</section>`;
   if (sentTo) $('#lg-otp', root)?.focus();

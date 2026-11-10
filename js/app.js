@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import * as athleteViews from './athlete.js';
 import * as coachViews from './coach.js';
-import { esc, bindActions, toast, ask, styledSelects, demoLinks } from './ui.js';
+import { esc, bindActions, toast, ask, styledSelects, demoLinks, closeSheet } from './ui.js';
 import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
 
 store.load({ cloud: cloudEnabled });
@@ -26,6 +26,18 @@ const routes = [
   [/^\/settings$/, settingsView],
 ];
 
+// Tab bar line icons (24px grid, stroked with currentColor).
+const svg = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  today: svg('<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
+  progress: svg('<path d="M5 20V11M12 20V5M19 20v-6"/>'),
+  history: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  more: svg('<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>'),
+  team: svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8M16 6.2a3 3 0 0 1 0 5.6M17.5 14.6c1.7.6 2.7 2.1 3 4.4"/>'),
+  programs: svg('<rect x="4" y="4" width="16" height="5" rx="1.5"/><rect x="4" y="11" width="16" height="9" rx="1.5"/>'),
+  exercises: svg('<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>'),
+};
+
 function me() { return store.settings().me || null; }
 
 function nav(path) {
@@ -33,16 +45,16 @@ function nav(path) {
   let items = [];
   if (m?.role === 'athlete') {
     const id = m.athleteId;
-    items = [[`#/athlete/${id}`, 'Today', '◉'], [`#/athlete/${id}/week`, 'Analytics', '▤'], [`#/athlete/${id}/history`, 'History', '↺'], ['#/settings', 'More', '⋯']];
+    items = [[`#/athlete/${id}`, 'Today', ICONS.today], [`#/athlete/${id}/week`, 'Progress', ICONS.progress], [`#/athlete/${id}/history`, 'History', ICONS.history], ['#/settings', 'More', ICONS.more]];
   } else if (m?.role === 'coach') {
-    items = [['#/coach', 'Team', '◉'], ['#/coach/blocks', 'Programs', '▤'], ['#/coach/exercises', 'Exercises', '☰'], ['#/settings', 'More', '⋯']];
+    items = [['#/coach', 'Team', ICONS.team], ['#/coach/blocks', 'Programs', ICONS.programs], ['#/coach/exercises', 'Exercises', ICONS.exercises], ['#/settings', 'More', ICONS.more]];
   }
   const el = document.getElementById('nav');
   el.hidden = !items.length;
   // Highlight the tab whose path is the longest prefix of the current one.
   const active = items.map(([h]) => h.slice(1)).filter((p) => path === p || path.startsWith(`${p}/`)).sort((a, b) => b.length - a.length)[0];
   el.innerHTML = items.map(([href, label, icon]) =>
-    `<a href="${href}" class="${href.slice(1) === active ? 'on' : ''}"><span aria-hidden="true">${icon}</span>${label}</a>`).join('');
+    `<a href="${href}" class="${href.slice(1) === active ? 'on' : ''}">${icon}${label}</a>`).join('');
 }
 
 // Sync calls this with keepScroll so a background refresh doesn't jump the page.
@@ -54,6 +66,8 @@ function render(keepScroll = false) {
   const root = document.getElementById('view');
   root._unbind?.();
   root._unbind = null;
+  // A pop-up belongs to the page it was opened on.
+  if (keepScroll !== true) closeSheet();
   // Play the page entrance only when navigating, not on background refreshes.
   // The class comes off again so in-place redraws (ticking a set) stay still.
   clearTimeout(root._enterT);
@@ -81,7 +95,7 @@ function render(keepScroll = false) {
 function home(root) {
   const athletes = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
   root.innerHTML = `
-    <header class="page-head hero"><h1>Training log</h1>
+    <header class="page-head hero"><h1>Chunky Training</h1>
       <p class="muted">Demo mode: everything is saved on this device. Pick who you are to try it.</p></header>
     <section class="card">
       <h3>I'm the coach</h3>
