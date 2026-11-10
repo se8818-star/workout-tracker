@@ -595,3 +595,13 @@ button.last b { color: var(--track); white-space: nowrap; }
 .block-row > div:first-child { min-width: 0; }
 .who-list { display: block; }
 .who-item { display: block; }
+
+/* Maxes: pick an exercise, see its max */
+.max-pick { display: grid; gap: 10px; margin: 8px 0 12px; }
+.max-show { background: var(--ink); color: var(--paper); border: var(--rule); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.max-show .stat-value small { font-size: 0.9rem; color: var(--paper); }
+.max-show .max-src { color: #b9b2a5; margin: 0; }
+.max-edit { display: flex; align-items: baseline; gap: 8px; }
+.max-edit input { width: 8.5em; font-family: var(--mono); font-size: 1.5rem; font-weight: 800; color: var(--hi); background: transparent; border: 2px solid var(--hi); padding: 4px 8px; }
+.max-edit input::placeholder { color: #8d877c; font-size: 1rem; font-weight: 600; }
+.max-edit span { font-family: var(--mono); font-size: 0.9rem; }
