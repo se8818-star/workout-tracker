@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, libraryView, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, libraryView, libraryMatch, patternOf, filterCount, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
@@ -884,6 +884,13 @@ function itemsUsing(exId) {
 }
 
 const LIB_VIEW = 'wt-library-view';
+// The boxes in the exercise library's Filter panel.
+const LIB_FILTERS = [
+  { key: 'pattern', label: 'Movement', opts: PATTERNS.map((p) => [p, PATTERN_LABEL[p]]) },
+  { key: 'body', label: 'Body', opts: [['lower', 'Lower'], ['upper', 'Upper'], ['full', 'Full']] },
+  { key: 'measure', label: 'Logged as', opts: MEASURES },
+  { key: 'extra', label: 'Other', opts: [['video', 'Has a demo video'], ['novideo', 'No demo video'], ['loaded', 'Uses a weight']] },
+];
 
 export function exercises(root, _p, query) {
   const editId = query.get('edit');
@@ -891,14 +898,12 @@ export function exercises(root, _p, query) {
   const back = (query.get('back') || '').startsWith('#/coach/') ? query.get('back') : '#/coach/exercises';
   const uses = editId ? itemsUsing(editId) : [];
   const list = store.all('exercises').filter((e) => !e.hidden).sort((a, b) => a.name.localeCompare(b.name));
-  const counts = {};
-  const kind = (e) => (PATTERNS.includes(e.pattern) ? e.pattern : 'other');
-  for (const e of list) counts[kind(e)] = (counts[kind(e)] || 0) + 1;
-  // Sort and movement filter are remembered on this device.
+  // Sort and filters are remembered on this device.
   let view = {};
   try { view = JSON.parse(localStorage.getItem(LIB_VIEW)) || {}; } catch { /* private mode */ }
   if (view.sort !== 'pattern') view.sort = 'name';
-  if (!counts[view.type]) view.type = '';
+  const filters = {};
+  for (const g of LIB_FILTERS) filters[g.key] = (Array.isArray(view.filters?.[g.key]) ? view.filters[g.key] : []).filter((v) => g.opts.some(([o]) => o === v));
   const x = editId ? (store.get('exercises', editId) || { id: '', name: '', pattern: 'other', body: 'full', loaded: true, alts: [] }) : null;
   const form = x ? `
     <section class="card form" id="ex-form">
@@ -926,34 +931,53 @@ export function exercises(root, _p, query) {
     <section class="card lib-card" id="lib-card" hidden></section>
     <div class="row gap"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises"><a class="btn" href="#/coach/exercises?edit=new">+ New</a></div>
     <div class="row gap wrap lib-view">
+      <button class="btn ghost filter-btn" id="ex-filter-btn" aria-expanded="false" aria-controls="ex-filters">Filter <b id="ex-filter-n"></b></button>
       <label class="lib-pick"><span>Sort</span><select id="ex-sort"><option value="name" ${view.sort === 'name' ? 'selected' : ''}>Name A–Z</option><option value="pattern" ${view.sort === 'pattern' ? 'selected' : ''}>Movement type</option></select></label>
-      <label class="lib-pick"><span>Show</span><select id="ex-type"><option value="">All movements</option>${PATTERNS.filter((p) => counts[p]).map((p) => `<option value="${p}" ${view.type === p ? 'selected' : ''}>${PATTERN_LABEL[p]} (${counts[p]})</option>`).join('')}</select></label>
     </div>
+    <section class="card filter-panel" id="ex-filters" hidden>
+      ${LIB_FILTERS.map((g) => `<fieldset class="filter-group"><legend>${g.label}</legend><div class="row gap wrap">${g.opts.map(([v, label]) => {
+        const n = list.filter((e) => libraryMatch(e, { [g.key]: [v] })).length;
+        return n || filters[g.key].includes(v) ? `<label class="check-chip"><input type="checkbox" data-fk="${g.key}" value="${v}" ${filters[g.key].includes(v) ? 'checked' : ''}> ${label} <small>${n}</small></label>` : '';
+      }).join('')}</div></fieldset>`).join('')}
+      <div class="row between"><button class="link" id="ex-filter-clear">Clear all</button><button class="btn" id="ex-filter-done">Done</button></div>
+    </section>
+    <p class="muted small" id="ex-showing"></p>
     <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody id="ex-rows">
     </tbody></table></div>`;
   const q = $('#ex-q', root);
   const sortSel = $('#ex-sort', root);
-  const typeSel = $('#ex-type', root);
-  const row = (e) => `<tr data-name="${esc(e.name.toLowerCase())}" data-grp="${kind(e)}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a>${e.video ? ` <button class="demo-mark" ${demoAttrs(e)} aria-label="Watch the ${esc(e.name)} demo">▶</button>` : ''}</td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`;
+  const panel = $('#ex-filters', root);
+  const fBtn = $('#ex-filter-btn', root);
+  const row = (e) => `<tr data-name="${esc(e.name.toLowerCase())}" data-grp="${patternOf(e)}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a>${e.video ? ` <button class="demo-mark" ${demoAttrs(e)} aria-label="Watch the ${esc(e.name)} demo">▶</button>` : ''}</td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`;
   // Search hides rows; a movement heading hides when none of its rows are left.
   const filter = () => {
     const t = q.value.toLowerCase();
     const left = {};
     root.querySelectorAll('tr[data-name]').forEach((r) => { r.hidden = !r.dataset.name.includes(t); if (!r.hidden) left[r.dataset.grp] = (left[r.dataset.grp] || 0) + 1; });
     root.querySelectorAll('tr[data-head]').forEach((h) => { const n = left[h.dataset.head] || 0; h.hidden = !n; h.querySelector('small').textContent = n; });
+    const shown = Object.values(left).reduce((a, b) => a + b, 0);
+    $('#ex-showing', root).textContent = shown === list.length ? '' : `Showing ${fmt(shown)} of ${fmt(list.length)}`;
   };
   const draw = () => {
-    const prefs = { sort: sortSel.value, type: typeSel.value };
+    for (const g of LIB_FILTERS) filters[g.key] = [...panel.querySelectorAll(`input[data-fk="${g.key}"]:checked`)].map((c) => c.value);
+    const prefs = { sort: sortSel.value, filters };
+    const n = filterCount(filters);
+    $('#ex-filter-n', root).textContent = n || '';
+    fBtn.classList.toggle('on', n > 0);
     try { localStorage.setItem(LIB_VIEW, JSON.stringify(prefs)); } catch { /* private mode */ }
     const shown = libraryView(list, prefs);
     $('#ex-rows', root).innerHTML = shown.length
       ? shown.map((g) => (g.pattern ? `<tr class="grp-head" data-head="${esc(g.pattern)}"><th colspan="5">${esc(PATTERN_LABEL[g.pattern] || g.pattern)} <small>${g.items.length}</small></th></tr>` : '') + g.items.map(row).join('')).join('')
-      : '<tr><td colspan="5" class="muted">No exercises of this type yet.</td></tr>';
+      : '<tr><td colspan="5" class="muted">Nothing matches these filters.</td></tr>';
     filter();
   };
   q.addEventListener('input', filter);
   sortSel.addEventListener('change', draw);
-  typeSel.addEventListener('change', draw);
+  panel.addEventListener('change', draw);
+  const openPanel = (open) => { panel.hidden = !open; fBtn.setAttribute('aria-expanded', String(open)); };
+  fBtn.addEventListener('click', () => openPanel(panel.hidden));
+  $('#ex-filter-done', root).addEventListener('click', () => openPanel(false));
+  $('#ex-filter-clear', root).addEventListener('click', () => { panel.querySelectorAll('input:checked').forEach((c) => { c.checked = false; }); draw(); });
   draw();
   if (x) $('#ex-form', root).scrollIntoView({ block: 'start' });
   else libraryCard(root);

@@ -581,3 +581,10 @@ button.last b { color: var(--track); white-space: nowrap; }
 .tbl tr.grp-head th { background: var(--paper); color: var(--ink); border-top: var(--rule); border-bottom: var(--thin); font-family: var(--head); font-size: 0.95rem; font-weight: 900; padding: 8px 10px; }
 .tbl tr.grp-head th small { font-family: var(--mono); font-size: 0.62rem; color: var(--track); margin-left: 6px; }
 .tbl tbody tr.grp-head:hover { background: transparent; }
+.filter-btn.on { background: var(--ink); color: var(--paper); }
+.filter-btn b { font-family: var(--mono); color: var(--hi); }
+.filter-panel { margin-bottom: 12px; }
+.filter-group { border: 0; padding: 0; margin: 0 0 14px; }
+.filter-group legend { font-family: var(--mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; margin-bottom: 6px; }
+.filter-group .check-chip small { font-family: var(--mono); font-size: 0.62rem; opacity: 0.7; }
+#ex-showing:empty { display: none; }

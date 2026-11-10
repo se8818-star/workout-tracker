@@ -3,15 +3,31 @@
 
 export const PATTERNS = ['squat', 'hinge', 'push', 'pull', 'carry', 'core', 'plyo', 'sprint', 'throw', 'other'];
 
-// Exercise library view: the exercises (already in name order) kept to one
-// movement type if `type` is set, in groups. Sorting by movement gives one
-// group per type in PATTERNS order (unknown types last, as "other"); sorting
-// by name gives a single group with no pattern, so no heading is drawn.
-export function libraryView(list, { sort = 'name', type = '' } = {}) {
-  const kept = type ? list.filter((e) => (PATTERNS.includes(e.pattern) ? e.pattern : 'other') === type) : list;
+// Exercise library view. `filters` holds the ticked boxes per group:
+// { pattern: [], body: [], measure: [], extra: ['video', 'loaded'] }. Inside a
+// group any ticked box matches; across groups all must match; an empty group
+// doesn't filter. Sorting by movement gives one group per type in PATTERNS
+// order (unknown types count as "other"); sorting by name gives one group with
+// no pattern, so no heading is drawn. `list` is already in name order.
+export const patternOf = (e) => (PATTERNS.includes(e.pattern) ? e.pattern : 'other');
+const FILTER_VALUE = { pattern: patternOf, body: (e) => e.body || 'full', measure: (e) => e.measure || 'reps' };
+
+export function libraryMatch(e, filters = {}) {
+  for (const [k, get] of Object.entries(FILTER_VALUE)) if (filters[k]?.length && !filters[k].includes(get(e))) return false;
+  const extra = filters.extra || [];
+  if (extra.includes('video') && !e.video) return false;
+  if (extra.includes('loaded') && !e.loaded) return false;
+  if (extra.includes('novideo') && e.video) return false;
+  return true;
+}
+
+export const filterCount = (filters = {}) => Object.values(filters).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0);
+
+export function libraryView(list, { sort = 'name', filters = {} } = {}) {
+  const kept = list.filter((e) => libraryMatch(e, filters));
   if (sort !== 'pattern') return kept.length ? [{ pattern: null, items: kept }] : [];
   const groups = new Map(PATTERNS.map((p) => [p, []]));
-  for (const e of kept) groups.get(PATTERNS.includes(e.pattern) ? e.pattern : 'other').push(e);
+  for (const e of kept) groups.get(patternOf(e)).push(e);
   return [...groups].filter(([, items]) => items.length).map(([pattern, items]) => ({ pattern, items }));
 }
 
