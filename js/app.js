@@ -38,6 +38,24 @@ const ICONS = {
   exercises: svg('<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>'),
 };
 
+// Appearance, per device: light unless the person picks 'dark' or 'auto'
+// (match the phone). Kept in its own key so index.html can apply it before
+// the page draws.
+function theme() { try { return localStorage.getItem('wt-theme') || 'light'; } catch { return 'light'; } }
+function setTheme(v) {
+  try { if (v === 'light') localStorage.removeItem('wt-theme'); else localStorage.setItem('wt-theme', v); } catch { /* private mode */ }
+  applyTheme();
+}
+function applyTheme() {
+  const t = theme();
+  if (t === 'light') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  // The phone's status bar color follows the app.
+  const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.content = dark ? '#0f0f0e' : '#f3f3f0'; });
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+
 function me() { return store.settings().me || null; }
 
 function nav(path) {
@@ -118,6 +136,7 @@ function settingsView(root) {
     <header class="page-head"><h1>More</h1></header>
     ${me()?.role === 'coach' ? `<section class="card">${teamInfo() ? `<p>Team <b>${esc(teamInfo().team?.name)}</b>. Athletes join with code <b class="code">${esc(teamInfo().team?.join_code)}</b></p>` : ''}<a class="btn wide" href="#/coach/assign">Assign a program</a></section>` : ''}
     <section class="card form">
+      <label class="field-row"><span>Appearance</span><select data-action="theme" aria-label="Appearance">${[['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match my phone']].map(([v, l]) => `<option value="${v}" ${theme() === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field-row"><span>Units</span><select data-action="units"><option ${s.units === 'lb' ? 'selected' : ''}>lb</option><option ${s.units === 'kg' ? 'selected' : ''}>kg</option></select></label>
       <label class="field-row"><span>Round weights to (${s.units})</span><input type="number" step="0.5" min="0" value="${s.units === 'kg' ? (s.roundingKg ?? 2.5) : s.rounding}" data-action="rounding"></label>
       <p class="muted small">Weights are saved once and shown in each person's unit, so a coach in kg and an athlete in lb see the same load.</p>
@@ -136,6 +155,7 @@ function settingsView(root) {
       ${cloudEnabled ? '' : '<button class="btn ghost wide danger" data-action="reset">Reset demo data</button>'}
     </section>`;
   bindActions(root, {
+    theme: (el) => setTheme(el.value),
     units: (el) => { store.setSetting('units', el.value); settingsView(root); },
     rounding: (el) => store.setSetting(s.units === 'kg' ? 'roundingKg' : 'rounding', Number(el.value) || 0),
     savePassword: async () => {

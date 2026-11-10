@@ -34,14 +34,24 @@
   --mono: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif; /* kept as a name; numbers use tabular figures */
   color-scheme: light;
 }
+/* Dark theme. The app is light unless the person picks Dark, or "Match my
+   phone" with the phone in dark mode, on the More page (app.js sets
+   data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root[data-theme="auto"] {
     --paper: #0f0f0e; --card: #1b1b19; --fill: #262624; --fill-2: #302f2c; --ink: #f1f0ec; --muted: #a19f98; --faint: #6d6c66;
     --line: #2c2b28; --line-2: #3a3935; --track: #ef5a43; --track-soft: #3a1f1a; --turf: #3fb57a; --turf-soft: #15301f;
     --warn: #e2a94a; --warn-soft: #3a2e12; --danger: #f06b5e; --hi: #e2a94a; --hi-soft: #33290f;
     --scrim: rgb(0 0 0 / 0.55); --bar-bg: rgb(22 22 20 / 0.88); --shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --paper: #0f0f0e; --card: #1b1b19; --fill: #262624; --fill-2: #302f2c; --ink: #f1f0ec; --muted: #a19f98; --faint: #6d6c66;
+  --line: #2c2b28; --line-2: #3a3935; --track: #ef5a43; --track-soft: #3a1f1a; --turf: #3fb57a; --turf-soft: #15301f;
+  --warn: #e2a94a; --warn-soft: #3a2e12; --danger: #f06b5e; --hi: #e2a94a; --hi-soft: #33290f;
+  --scrim: rgb(0 0 0 / 0.55); --bar-bg: rgb(22 22 20 / 0.88); --shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
