@@ -290,3 +290,24 @@ test('assignment status: upcoming, current, ended by date or by running out of w
   assert.equal(assignmentStatus({ ...g, endDate: '2026-11-05' }, b, '2026-11-06'), 'ended');
   assert.equal(assignmentStatus(g, { kind: 'warmup', weeks: 1 }, '2026-12-25'), 'current');
 });
+
+test('libraryView sorts by name or groups by movement type, with filters', async () => {
+  const { libraryView, filterCount } = await import('../js/calc.js');
+  const list = [
+    { name: 'Bench', pattern: 'push', body: 'upper', loaded: true, video: 'x' }, { name: 'Deadlift', pattern: 'hinge', body: 'lower', loaded: true },
+    { name: 'Odd', pattern: 'weird' }, { name: 'Plank', pattern: 'core', measure: 'time' }, { name: 'Z press', pattern: 'push', body: 'upper', loaded: true },
+  ];
+  const names = (gs) => gs.flatMap((g) => g.items.map((e) => e.name));
+  assert.deepEqual(libraryView(list).map((g) => [g.pattern, g.items.length]), [[null, 5]]);
+  assert.deepEqual(libraryView(list, { sort: 'pattern' }).map((g) => [g.pattern, g.items.map((e) => e.name)]),
+    [['hinge', ['Deadlift']], ['push', ['Bench', 'Z press']], ['core', ['Plank']], ['other', ['Odd']]]);
+  // Several boxes in one group: any of them.
+  assert.deepEqual(names(libraryView(list, { filters: { pattern: ['push', 'core'] } })), ['Bench', 'Plank', 'Z press']);
+  // Boxes in different groups: all of them.
+  assert.deepEqual(names(libraryView(list, { filters: { pattern: ['push', 'hinge'], extra: ['video'] } })), ['Bench']);
+  assert.deepEqual(names(libraryView(list, { filters: { body: ['full'] } })), ['Odd', 'Plank']);
+  assert.deepEqual(names(libraryView(list, { filters: { measure: ['time'] } })), ['Plank']);
+  assert.deepEqual(names(libraryView(list, { filters: { pattern: ['other'] } })), ['Odd']);
+  assert.deepEqual(libraryView(list, { filters: { pattern: ['carry'] } }), []);
+  assert.equal(filterCount({ pattern: ['push', 'core'], body: [], extra: ['video'] }), 3);
+});
