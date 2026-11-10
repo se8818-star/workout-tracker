@@ -232,6 +232,33 @@ export function session(root, { id, date, warm = false }) {
   const unitOf = (i, j) => log.entries[i].sets[j].unit || log.entries[i].unit || store.unit();
   const markEntry = (i) => root.querySelector(`#entry-${i}`)?.classList.toggle('complete', log.entries[i].sets.every((s) => s.done));
 
+  // Saves the workout as finished and updates maxes. `auto` is when the last
+  // set was just ticked: the workout finishes by itself (RPE and minutes are
+  // optional) and the athlete stays on the page.
+  const complete = (auto = false) => {
+    log.finished = true;
+    // Update maxes when a logged set beats the estimated 1RM on file. A jump
+    // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
+    // left for the coach to confirm instead of changing every future load.
+    const prs = [], odd = [];
+    delete log.maxFlags;
+    for (const e of log.entries) {
+      const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
+      const cur = athlete.maxes?.[e.exerciseId];
+      if (!cur || best <= cur) continue;
+      const name = store.get('exercises', e.exerciseId)?.name;
+      if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
+      athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
+    }
+    if (prs.length) store.put('athletes', athlete);
+    store.saveLog(log);
+    const done = auto ? `All sets done, ${warm ? 'warmup' : 'workout'} finished` : warm ? 'Warmup saved' : 'Workout saved';
+    toast(odd.length ? `${done}. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
+      : prs.length ? `${done}. New estimated max: ${prs.join(', ')}` : done);
+    if (auto) rerender(); else location.hash = `#/athlete/${id}?d=${date}`;
+  };
+  const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
+
   bindActions(root, {
     toggleSet: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
@@ -249,6 +276,7 @@ export function session(root, { id, date, warm = false }) {
       el.closest('.set').classList.toggle('done', s.done);
       markEntry(el.dataset.i);
       persist();
+      if (s.done && !log.finished && allDone()) complete(true);
     },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
@@ -278,27 +306,7 @@ export function session(root, { id, date, warm = false }) {
     },
     minutes: (el) => { log.minutes = el.value === '' ? null : Number(el.value); persist(); },
     sessionNote: (el) => { log.note = el.value; persist(); },
-    finish: () => {
-      log.finished = true;
-      // Update maxes when a logged set beats the estimated 1RM on file. A jump
-      // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
-      // left for the coach to confirm instead of changing every future load.
-      const prs = [], odd = [];
-      delete log.maxFlags;
-      for (const e of log.entries) {
-        const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
-        const cur = athlete.maxes?.[e.exerciseId];
-        if (!cur || best <= cur) continue;
-        const name = store.get('exercises', e.exerciseId)?.name;
-        if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
-        athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
-      }
-      if (prs.length) store.put('athletes', athlete);
-      store.saveLog(log);
-      toast(odd.length ? `Saved. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
-        : prs.length ? `Saved. New estimated max: ${prs.join(', ')}` : warm ? 'Warmup saved' : 'Workout saved');
-      location.hash = `#/athlete/${id}?d=${date}`;
-    },
+    finish: () => complete(),
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
     editEntry: (el) => editEntrySheet(log.entries[el.dataset.i], () => { persist(); rerender(); }),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
