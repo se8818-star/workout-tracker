@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -87,6 +87,7 @@ function workoutCard(id, iso, title, sub, count, log, warm = false) {
 
 // Today: the day's workout(s) as cards. Tapping one opens the workout page.
 export function today_(root, { id }, query) {
+  store.fillMaxes(id);
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const iso = query.get('d') || today();
@@ -238,24 +239,20 @@ export function session(root, { id, date, warm = false }) {
   // optional) and the athlete stays on the page.
   const complete = (auto = false) => {
     log.finished = true;
-    // Update maxes when a logged set beats the estimated 1RM on file. A jump
-    // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
-    // left for the coach to confirm instead of changing every future load.
-    const prs = [], odd = [];
+    // Every lift with a weight sets or raises that exercise's max, estimated
+    // with the rep-max formula. A jump of more than MAX_JUMP (or a weight far
+    // over the target) is more likely a typo (2250 for 225), so it's left for
+    // the coach to confirm instead of changing every future load.
     delete log.maxFlags;
-    for (const e of log.entries) {
-      const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
-      const cur = athlete.maxes?.[e.exerciseId];
-      if (!cur || best <= cur) continue;
-      const name = store.get('exercises', e.exerciseId)?.name;
-      if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
-      athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
-    }
+    const res = applyEstimates(athlete, estimateMaxes([log], { after: clearedAfter(athlete), withTypos: true }), { jump: MAX_JUMP });
+    const nameOf = (x) => store.get('exercises', x)?.name || 'Exercise';
+    const prs = [...res.added, ...res.raised].map(nameOf), odd = res.flagged.map((f) => nameOf(f.exerciseId));
+    if (res.flagged.length) log.maxFlags = res.flagged;
     if (prs.length) store.put('athletes', athlete);
     store.saveLog(log);
     const done = auto ? `All sets done, ${warm ? 'warmup' : 'workout'} finished` : warm ? 'Warmup saved' : 'Workout saved';
     toast(odd.length ? `${done}. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
-      : prs.length ? `${done}. New estimated max: ${prs.join(', ')}` : done);
+      : prs.length ? `${done}. New max: ${prs.join(', ')}` : done);
     if (auto) rerender(); else location.hash = `#/athlete/${id}?d=${date}`;
   };
   const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
@@ -596,7 +593,14 @@ export function week(root, { id }, query) {
     <p class="muted small">Session load = session RPE × minutes. Plyo tiers: ${Object.entries(PLYO_TIERS).filter(([k]) => k >= 5).map(([, v]) => v).join(', ')} count as high intensity.</p>`;
 }
 
+// Where a max came from: "est. from 185 × 5, Nov 3" or "typed in".
+export function maxSource(a, k, u = store.unit()) {
+  const m = a?.maxInfo?.[k];
+  return m?.est ? `est. from ${fmt(store.showW(m.weight, u), 1)} ${u} × ${m.reps}${m.date ? `, ${fmtDate(m.date, { month: 'short', day: 'numeric' })}` : ''}` : 'typed in';
+}
+
 export function history(root, { id }) {
+  store.fillMaxes(id);
   const logs = store.logsFor(id).filter((l) => loggedWork(l) && !l.warmup).reverse();
   const ex = store.exercisesById();
   const u = store.unit();
@@ -604,7 +608,7 @@ export function history(root, { id }) {
   const maxes = Object.entries(athlete?.maxes || {});
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<h1>History</h1></header>
-    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}</span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
+    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}<small class="muted max-src">${maxSource(athlete, k, u)}</small></span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);

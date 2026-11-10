@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -184,6 +184,18 @@ export function exerciseHistory(athleteId, exerciseId, beforeIso) {
     }
   }
   return out;
+}
+
+// Gives the athlete a max for every exercise they've lifted but have no max
+// for yet, estimated from their best logged set. Maxes already on file are
+// left to Finish (which raises them) and to the coach. Returns what it added.
+export function fillMaxes(athleteId) {
+  const a = get('athletes', athleteId);
+  if (!a) return [];
+  const probe = { maxes: { ...a.maxes }, maxInfo: a.maxInfo };
+  const res = applyEstimates(probe, estimateMaxes(logsFor(athleteId), { after: clearedAfter(a) }), { onlyMissing: true });
+  if (res.added.length) put('athletes', { ...a, maxes: probe.maxes, maxInfo: probe.maxInfo });
+  return res.added;
 }
 
 // Most recent logged sets for an exercise before a date ("last time").
