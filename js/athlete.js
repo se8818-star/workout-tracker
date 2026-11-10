@@ -1,9 +1,10 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
+import { timerSheet } from './timer.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
@@ -87,6 +88,7 @@ function workoutCard(id, iso, title, sub, count, log, warm = false) {
 
 // Today: the day's workout(s) as cards. Tapping one opens the workout page.
 export function today_(root, { id }, query) {
+  store.fillMaxes(id);
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const iso = query.get('d') || today();
@@ -150,7 +152,8 @@ function entryCard(log, entry, i, label) {
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
-      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s), loaded))}</span>
+      ${measure === 'time' && (s.targetSecs ?? s.secs) ? `<button class="target timer-btn" data-action="timer" data-i="${i}" data-j="${j}" aria-label="Start a ${fmtSecs(s.targetSecs ?? s.secs)} timer for set ${j + 1}"><span class="timer-ico" aria-hidden="true">⏱</span>${esc(targetText(s, measure, su(s), loaded))}</button>`
+        : `<span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s), loaded))}</span>`}
       ${loaded ? `<div class="field wfield"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight, su(s)) ?? ''}" placeholder="${store.showW(s.targetWeight, su(s)) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight in ${su(s)}, set ${j + 1}"><button class="unit-btn" data-action="setUnit" data-i="${i}" data-j="${j}" aria-label="Weight unit for set ${j + 1}: ${su(s)}. Tap to switch">${su(s)}</button></div>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
@@ -238,24 +241,20 @@ export function session(root, { id, date, warm = false }) {
   // optional) and the athlete stays on the page.
   const complete = (auto = false) => {
     log.finished = true;
-    // Update maxes when a logged set beats the estimated 1RM on file. A jump
-    // of more than MAX_JUMP is more likely a typo (2250 for 225), so it's
-    // left for the coach to confirm instead of changing every future load.
-    const prs = [], odd = [];
+    // Every lift with a weight sets or raises that exercise's max, estimated
+    // with the rep-max formula. A jump of more than MAX_JUMP (or a weight far
+    // over the target) is more likely a typo (2250 for 225), so it's left for
+    // the coach to confirm instead of changing every future load.
     delete log.maxFlags;
-    for (const e of log.entries) {
-      const best = Math.max(0, ...e.sets.filter((s) => s.done).map((s) => e1rm(s.weight, s.reps)));
-      const cur = athlete.maxes?.[e.exerciseId];
-      if (!cur || best <= cur) continue;
-      const name = store.get('exercises', e.exerciseId)?.name;
-      if (best > cur * MAX_JUMP) { odd.push(name); (log.maxFlags ||= []).push({ exerciseId: e.exerciseId, est: Math.round(best) }); continue; }
-      athlete.maxes[e.exerciseId] = Math.round(best * 10) / 10; prs.push(name);
-    }
+    const res = applyEstimates(athlete, estimateMaxes([log], { after: clearedAfter(athlete), withTypos: true }), { jump: MAX_JUMP });
+    const nameOf = (x) => store.get('exercises', x)?.name || 'Exercise';
+    const prs = [...res.added, ...res.raised].map(nameOf), odd = res.flagged.map((f) => nameOf(f.exerciseId));
+    if (res.flagged.length) log.maxFlags = res.flagged;
     if (prs.length) store.put('athletes', athlete);
     store.saveLog(log);
     const done = auto ? `All sets done, ${warm ? 'warmup' : 'workout'} finished` : warm ? 'Warmup saved' : 'Workout saved';
     toast(odd.length ? `${done}. ${odd.join(', ')}: big jump, so your max wasn't changed. Check the weight you typed.`
-      : prs.length ? `${done}. New estimated max: ${prs.join(', ')}` : done);
+      : prs.length ? `${done}. New max: ${prs.join(', ')}` : done);
     if (auto) rerender(); else location.hash = `#/athlete/${id}?d=${date}`;
   };
   const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
@@ -278,6 +277,19 @@ export function session(root, { id, date, warm = false }) {
       markEntry(el.dataset.i);
       persist();
       if (s.done && !log.finished && allDone()) complete(true);
+    },
+    // Timed sets: the target opens a countdown for the assigned seconds.
+    // When time is up the athlete can tick the set from the pop-up.
+    timer: (el) => {
+      const { i, j } = el.dataset, e = log.entries[i], s = e.sets[j];
+      const name = store.get('exercises', e.exerciseId)?.name || 'Timer';
+      timerSheet({
+        secs: s.targetSecs ?? s.secs, title: name, sub: `Set ${Number(j) + 1} of ${e.sets.length}`,
+        onDone: s.done ? null : () => {
+          if (!log.entries[i]?.sets[j] || log.entries[i].sets[j].done) return;
+          root.querySelector(`.check[data-i="${i}"][data-j="${j}"]`)?.click();
+        },
+      });
     },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
@@ -596,7 +608,39 @@ export function week(root, { id }, query) {
     <p class="muted small">Session load = session RPE × minutes. Plyo tiers: ${Object.entries(PLYO_TIERS).filter(([k]) => k >= 5).map(([, v]) => v).join(', ')} count as high intensity.</p>`;
 }
 
+// Where a max came from: "est. from 185 × 5, Nov 3" or "typed in".
+
+// One exercise at a time: a dropdown of exercises (ones with a max first,
+// showing it) and the chosen one's max below. `edit` adds a box to change it.
+const pickedMax = {};
+export function maxPicker(a, ex, u, { edit = false, choices = [] } = {}) {
+  const maxes = a?.maxes || {};
+  const name = (k) => ex[k]?.name || k;
+  const withMax = Object.keys(maxes).sort((x, y) => name(x).localeCompare(name(y)));
+  const rest = edit ? choices.map((x) => x.id).filter((k) => maxes[k] == null) : [];
+  const ids = [...withMax, ...rest];
+  if (!ids.length) return '';
+  let k = pickedMax[a.id];
+  if (!ids.includes(k)) k = ids[0];
+  pickedMax[a.id] = k;
+  const v = maxes[k];
+  const opt = (x) => `<option value="${esc(x)}" ${x === k ? 'selected' : ''}>${esc(name(x))}${maxes[x] != null ? ` · ${fmt(store.showW(maxes[x], u), 1)} ${u}` : ''}</option>`;
+  return `<div class="max-pick">
+    <select data-action="pickMax" data-athlete="${esc(a.id)}" aria-label="Exercise">${withMax.map(opt).join('')}${rest.length ? `<option disabled>── No max yet ──</option>${rest.map(opt).join('')}` : ''}</select>
+    <div class="max-show"><span class="stat-label">${esc(name(k))}</span>
+      ${edit ? `<label class="max-edit"><input type="number" inputmode="decimal" step="any" value="${v != null ? store.showW(v, u) : ''}" placeholder="No max yet" data-action="setMax" data-ex="${esc(k)}" aria-label="Max for ${esc(name(k))}"><span>${u}</span></label>`
+        : `<b class="stat-value">${fmt(store.showW(v, u), 1)} <small>${u}</small></b>`}
+      <small class="max-src">${v != null ? maxSource(a, k, u) : 'Type a number to set one, or it fills in after a logged set.'}</small></div></div>`;
+}
+export const pickMax = (el) => { pickedMax[el.dataset.athlete] = el.value; };
+
+export function maxSource(a, k, u = store.unit()) {
+  const m = a?.maxInfo?.[k];
+  return m?.est ? `est. from ${fmt(store.showW(m.weight, u), 1)} ${u} × ${m.reps}${m.date ? `, ${fmtDate(m.date, { month: 'short', day: 'numeric' })}` : ''}` : 'typed in';
+}
+
 export function history(root, { id }) {
+  store.fillMaxes(id);
   const logs = store.logsFor(id).filter((l) => loggedWork(l) && !l.warmup).reverse();
   const ex = store.exercisesById();
   const u = store.unit();
@@ -604,7 +648,7 @@ export function history(root, { id }) {
   const maxes = Object.entries(athlete?.maxes || {});
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<h1>History</h1></header>
-    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}</span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
+    ${maxes.length ? `<section class="card"><h3>Current maxes</h3>${maxPicker(athlete, ex, u)}</section>` : ''}
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
@@ -613,4 +657,5 @@ export function history(root, { id }) {
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
         <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
     }).join('') || '<p class="empty">No logged sessions yet.</p>'}`;
+  bindActions(root, { pickMax: (el) => { pickMax(el); history(root, { id }); } });
 }

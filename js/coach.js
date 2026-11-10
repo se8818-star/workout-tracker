@@ -1,11 +1,11 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, libraryView, libraryMatch, patternOf, filterCount, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, libraryView, libraryMatch, patternOf, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
-import { pickExerciseSheet, videoSheet } from './athlete.js';
+import { pickExerciseSheet, videoSheet, maxPicker, pickMax } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 import { planLibraryImport } from './libimport.js';
 import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
@@ -69,7 +69,9 @@ export function board(root, _p, query) {
 
 // ---------- athlete detail ----------
 
+
 export function athlete(root, { id }) {
+  store.fillMaxes(id);
   const a = store.get('athletes', id);
   if (!a) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const ex = store.exercisesById();
@@ -96,10 +98,8 @@ export function athlete(root, { id }) {
       <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
     </section>
     <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
-      <p class="muted small">Prescribed weights come from these. They also update when a logged set beats them by up to 20%; bigger jumps are flagged below for you to check. Clear a box to remove that max.</p>
-      <div class="max-grid">${Object.entries(a.maxes || {}).map(([k, v]) => `<label class="field-row"><span>${esc(ex[k]?.name || k)}</span><input type="number" inputmode="decimal" step="any" value="${store.showW(v)}" data-action="setMax" data-ex="${k}"></label>`).join('')}</div>
-      <div class="row gap"><select data-action="noop" id="new-max-ex" aria-label="Exercise">${loaded.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
-        <input type="number" id="new-max-val" placeholder="Max" inputmode="decimal" aria-label="Max"><button class="chip" data-action="addMax">Add</button></div>
+      ${maxPicker(a, ex, u, { edit: true, choices: loaded })}
+      <p class="muted small">Worked out for you from logged lifts (rep-max formula, sets of ${EST_MAX_REPS} reps or fewer). A new best raises a max by up to 20%; bigger jumps are flagged below for you to check. Type a number to set a max yourself; it stays until a logged set beats it. Clear the box to remove that max.</p>
     </section>
     <section class="card"><h3>Recent sessions and notes</h3>
       ${logs.map((l) => {
@@ -133,15 +133,15 @@ export function athlete(root, { id }) {
     },
     playVideo: (el) => videoSheet(el.dataset.path),
     setMax: (el) => {
-      if (el.value === '' || !Number(el.value)) { delete a.maxes[el.dataset.ex]; store.put('athletes', a); toast('Max removed'); athlete(root, { id }); return; }
-      a.maxes[el.dataset.ex] = store.readW(Number(el.value)); store.put('athletes', a); toast('Max saved');
+      const k = el.dataset.ex;
+      // A removed max isn't estimated again from the lifts already logged,
+      // only from new ones.
+      if ((el.value === '' || !Number(el.value)) && a.maxes?.[k] == null) return;
+      if (el.value === '' || !Number(el.value)) { delete a.maxes[k]; a.maxInfo = { ...a.maxInfo, [k]: { cleared: today() } }; store.put('athletes', a); toast('Max removed'); athlete(root, { id }); return; }
+      a.maxes[k] = store.readW(Number(el.value)); a.maxInfo = { ...a.maxInfo }; delete a.maxInfo[k]; store.put('athletes', a); toast('Max saved'); athlete(root, { id });
     },
     setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
-    addMax: () => {
-      const exId = $('#new-max-ex', root).value, v = Number($('#new-max-val', root).value);
-      if (!v) return;
-      a.maxes = { ...a.maxes, [exId]: store.readW(v) }; store.put('athletes', a); athlete(root, { id });
-    },
+    pickMax: (el) => { pickMax(el); athlete(root, { id }); },
     unassign: async (el) => { if (await ask('Logged sessions stay.', { title: 'Remove this program?', ok: 'Remove program', danger: true })) { store.del('assignments', el.dataset.id); athlete(root, { id }); } },
   });
 }

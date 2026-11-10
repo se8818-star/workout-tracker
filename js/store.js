@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -186,6 +186,18 @@ export function exerciseHistory(athleteId, exerciseId, beforeIso) {
   return out;
 }
 
+// Gives the athlete a max for every exercise they've lifted but have no max
+// for yet, estimated from their best logged set. Maxes already on file are
+// left to Finish (which raises them) and to the coach. Returns what it added.
+export function fillMaxes(athleteId) {
+  const a = get('athletes', athleteId);
+  if (!a) return [];
+  const probe = { maxes: { ...a.maxes }, maxInfo: a.maxInfo };
+  const res = applyEstimates(probe, estimateMaxes(logsFor(athleteId), { after: clearedAfter(a) }), { onlyMissing: true });
+  if (res.added.length) put('athletes', { ...a, maxes: probe.maxes, maxInfo: probe.maxInfo });
+  return res.added;
+}
+
 // Most recent logged sets for an exercise before a date ("last time").
 export function lastTime(athleteId, exerciseId, beforeIso) {
   return exerciseHistory(athleteId, exerciseId, beforeIso)[0] || null;
@@ -254,7 +266,10 @@ export function refreshLog(log) {
 // Logs with anything in them, or a workout the athlete picked, stay put.
 export function currentLog(athleteId, iso) {
   const log = logFor(athleteId, iso);
-  if (!log || log.chosen || log.switchedFrom !== undefined || !untouchedLog(log)) return refreshLog(log);
+  // A workout someone picked or switched to stays put, unless the program it
+  // came from has since been removed (then it's a leftover like any other).
+  const picked = log && (log.chosen || log.switchedFrom !== undefined) && (!log.assignmentId || get('assignments', log.assignmentId));
+  if (!log || picked || !untouchedLog(log)) return refreshLog(log);
   const plan = plannedOn(athleteId, iso)[0];
   if (!plan) { if (ownsLogs()) del('logs', log.id); return null; }
   if (plan.block.id !== log.blockId || plan.week !== log.week || plan.dayIndex !== log.dayIndex) return startLog(athleteId, iso, plan);

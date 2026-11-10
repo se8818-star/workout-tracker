@@ -235,6 +235,28 @@ button.last b { color: var(--track); white-space: nowrap; }
 .set.done input { background: var(--turf-soft); }
 .set.done .target { text-decoration: line-through 2px; }
 .entry-foot { display: flex; gap: 16px; align-items: center; }
+/* countdown timer for timed sets */
+.timer-btn {
+  display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-height: 36px; padding: 4px 6px;
+  font: 700 0.78rem var(--mono); color: var(--ink); background: var(--hi); border: var(--thin);
+  box-shadow: 2px 2px 0 var(--ink); cursor: pointer; white-space: normal; text-align: left; min-width: 0; max-width: 100%;
+}
+.timer-btn:active { transform: translate(2px, 2px); box-shadow: none; }
+.timer-ico { font-size: 0.85rem; line-height: 1; }
+.set.done .timer-btn { background: var(--turf-soft); box-shadow: none; text-decoration: line-through 2px; }
+.timer-sub { margin: 0 0 10px; font: 600 0.72rem var(--mono); text-transform: uppercase; color: var(--muted); }
+.timer-face { background: var(--ink); color: var(--hi); padding: 22px 12px 0; text-align: center; box-shadow: 3px 3px 0 var(--track); }
+.timer-clock { display: block; font: 900 clamp(4.2rem, 24vw, 6.5rem)/1 var(--head); font-stretch: 70%; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.timer-bar { display: block; height: 8px; margin: 18px -12px 0; background: #333; }
+.timer-bar i { display: block; height: 100%; width: 100%; background: var(--track); }
+.timer.up .timer-face { background: var(--turf); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
+.timer-msg { min-height: 1.4em; margin: 12px 0 4px; text-align: center; font: 900 1.3rem var(--head); text-transform: uppercase; font-stretch: 75%; }
+.timer-btns { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+.timer-btns .btn { min-height: 54px; font-size: 1.05rem; }
+.timer-tick { display: none; margin-top: 10px; background: var(--turf); min-height: 54px; }
+.timer.up .timer-tick { display: block; }
+.timer.up .timer-early { display: none; }
+.timer-early { display: block; margin: 14px auto 0; }
 /* form-check videos */
 .set-video { display: flex; align-items: center; gap: 14px; padding: 0 0 4px 34px; }
 .vid-chip {
@@ -308,6 +330,7 @@ button.last b { color: var(--track); white-space: nowrap; }
 .log-item { padding: 12px 0; border-bottom: var(--hair); }
 .log-item:last-child { border-bottom: 0; }
 .max-grid .field-row > span { flex-basis: 60%; }
+.max-src { display: block; margin-top: 2px; font-family: var(--body, inherit); font-size: 0.72rem; font-weight: 400; text-transform: none; letter-spacing: 0; }
 
 /* block builder */
 .title-input {
@@ -588,3 +611,13 @@ button.last b { color: var(--track); white-space: nowrap; }
 .filter-group legend { font-family: var(--mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; margin-bottom: 6px; }
 .filter-group .check-chip small { font-family: var(--mono); font-size: 0.62rem; opacity: 0.7; }
 #ex-showing:empty { display: none; }
+
+/* Maxes: pick an exercise, see its max */
+.max-pick { display: grid; gap: 10px; margin: 8px 0 12px; }
+.max-show { background: var(--ink); color: var(--paper); border: var(--rule); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.max-show .stat-value small { font-size: 0.9rem; color: var(--paper); }
+.max-show .max-src { color: #b9b2a5; margin: 0; }
+.max-edit { display: flex; align-items: baseline; gap: 8px; }
+.max-edit input { width: 8.5em; font-family: var(--mono); font-size: 1.5rem; font-weight: 800; color: var(--hi); background: transparent; border: 2px solid var(--hi); padding: 4px 8px; }
+.max-edit input::placeholder { color: #8d877c; font-size: 1rem; font-weight: 600; }
+.max-edit span { font-family: var(--mono); font-size: 0.9rem; }
