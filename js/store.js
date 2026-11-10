@@ -147,15 +147,18 @@ export function activeProgram(athleteId, iso) {
 
 // What is planned for an athlete on a date: [{assignment, block, week, dayIndex}]
 // Programs only; an assigned warmup is its own session (warmupOn).
+// An athlete is on one program at a time: once a newer program is running,
+// an older one that overlaps it (never given an end date, or a copy a phone
+// hadn't caught up on) no longer adds days of its own, so its old weekdays
+// can't show up as extra training days.
 export function plannedOn(athleteId, iso) {
-  const out = [];
   for (const a of assignmentsFor(athleteId)) {
     const block = get('blocks', a.blockId);
-    if (!block || block.kind === 'warmup') continue;
+    if (!block || block.kind === 'warmup' || assignmentStatus(a, block, iso) !== 'current') continue;
     const at = scheduledOn(a, block, iso);
-    if (at) out.push({ assignment: a, block, ...at });
+    return at ? [{ assignment: a, block, ...at }] : [];
   }
-  return out;
+  return [];
 }
 
 // The warmup assigned for a date: {assignment, block} or null.
