@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, sessionEntries, refreshEntries, untouchedLog, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -184,12 +184,16 @@ export function lastTime(athleteId, exerciseId, beforeIso) {
 const ownsLogs = () => demo || db.settings.me?.role !== 'coach';
 const keepLog = (log) => (ownsLogs() ? put('logs', log) : log);
 
+// What the athlete did before on this day of this program (or the program it
+// was copied from), so weekly rules build on their actual sets.
+const lastDone = (athleteId, block, dayIndex, week, beforeIso) => lastDoneFrom(logsFor(athleteId), block, dayIndex, week, beforeIso);
+
 // Start (or reopen) a log for a planned session.
 export function startLog(athleteId, iso, plan) {
   const existing = logFor(athleteId, iso);
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
-  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep());
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
   return keepLog({
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
@@ -221,7 +225,8 @@ export function refreshLog(log) {
   const copy = asg && asg.blockId !== log.blockId && get('blocks', asg.blockId);
   const block = copy?.copiedFrom === log.blockId ? copy : get('blocks', log.blockId);
   if (!block) return log;
-  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep());
+  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep(),
+    log.warmup ? null : lastDone(log.athleteId, block, log.dayIndex, log.week, log.date));
   if (!s) return log;
   const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
   const name = log.warmup ? log.name : s.name;

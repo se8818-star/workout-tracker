@@ -145,6 +145,7 @@ function entryCard(log, entry, i, label) {
   const cols = `${loaded ? '' : 'no-load'} ${measure === 'none' ? 'check-only' : ''}`;
   const tags = [];
   if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
+  if (entry.basedOn != null && !entry.sets.every((s) => s.done)) tags.push(`Targets build on what you did in week ${entry.basedOn + 1}`);
   if (entry.swappedFrom) tags.push(`Swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${cols}">

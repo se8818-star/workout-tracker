@@ -176,13 +176,81 @@ export function weekItems(block, dayIndex, week) {
   });
 }
 
+// Weekly rules build on what the athlete actually did, not only on what was
+// written. `done` is {week, sets}: the sets they finished of this exercise the
+// last time this day came up in the program (an earlier, non-deload week).
+// Each set's target becomes that set's actual number plus the rule's step for
+// every week since: programmed 10 x 135 with "+5 lb a week", done 9 x 130,
+// gives 10 x 135 next week (not 140). Only the number the rule moves changes.
+// A number the coach typed for this week, a deload week, or no log at all
+// leaves the programmed targets as they are. Returns per-set overrides
+// [{weight?, pct?, reps?, repsTo?, secs?}] or null.
+export function fromActual(item, week, block, athlete, done, rounding = 5) {
+  const prog = item.progression;
+  if (!prog?.step || !done?.sets?.length || isDeload(block, week) || done.week >= week) return null;
+  const gap = week - done.week;
+  const n = prescribedSets(item, block, week);
+  const measure = measureOf(item);
+  const ref = (j) => done.sets[Math.min(j, done.sets.length - 1)];
+  const out = Array.from({ length: n }, () => ({}));
+  let changed = false;
+  if (prog.type === 'add_weight' && item.weight != null && weekOverride(item, week, 'weight') == null) {
+    out.forEach((o, j) => { const w = Number(ref(j).weight); if (w > 0) { o.weight = roundTo(w + prog.step * gap, stepFor(rounding, item)); changed = true; } });
+  } else if (prog.type === 'add_pct' && item.pct != null && weekOverride(item, week, 'pct') == null) {
+    const max = athlete?.maxes?.[item.maxFrom || item.exerciseId];
+    if (max) out.forEach((o, j) => {
+      const w = Number(ref(j).weight);
+      if (w > 0) { o.weight = roundTo(w + max * prog.step / 100 * gap, stepFor(rounding, item)); o.pct = Math.round(o.weight / max * 200) / 2; changed = true; }
+    });
+  } else if (prog.type === 'add_reps' && isCount(measure) && weekOverride(item, week, 'reps') == null) {
+    const lo = prescribedReps(item, week), hi = prescribedRepsTo(item, week);
+    out.forEach((o, j) => {
+      const r = ref(j).reps;
+      if (r == null || r === '') return;
+      o.reps = Number(r) + prog.step * gap;
+      // A rep range keeps its width and moves with the low end.
+      if (hi != null) o.repsTo = o.reps + (hi - lo);
+      changed = true;
+    });
+  } else if (prog.type === 'add_secs' && measure === 'time' && weekOverride(item, week, 'secs') == null) {
+    out.forEach((o, j) => { const t = ref(j).secs; if (t != null && t !== '') { o.secs = Number(t) + prog.step * gap; changed = true; } });
+  }
+  return changed ? out : null;
+}
+
+// lastDone for buildSession from an athlete's logs: for the nth time an
+// exercise appears on the day, the sets they finished of it the most recent
+// earlier week this day came up in the same program (its copy or original
+// counts too). Deload weeks are skipped, so the week after a deload builds on
+// the week before it. Swapped or athlete-added exercises don't count.
+export function lastDoneFrom(logs, block, dayIndex, week, beforeIso) {
+  const ids = new Set([block.id, block.copiedFrom].filter(Boolean));
+  const past = logs.filter((l) => !l.warmup && ids.has(l.blockId) && l.dayIndex === dayIndex && l.week < week
+    && !isDeload(block, l.week) && (!beforeIso || l.date < beforeIso))
+    .sort((a, b) => b.week - a.week || b.date.localeCompare(a.date));
+  return (exerciseId, nth = 0) => {
+    for (const l of past) {
+      const e = (l.entries || []).filter((x) => x.exerciseId === exerciseId && !x.swappedFrom && !x.addedByAthlete)[nth];
+      const sets = (e?.sets || []).filter((x) => x.done);
+      if (sets.length) return { week: l.week, sets };
+    }
+    return null;
+  };
+}
+
 // Build the concrete session for one athlete: block day + week -> rows with sets.
-export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
+// `lastDone(exerciseId, nth)` gives what the athlete did of that exercise
+// before (see fromActual); leave it out to get the program as written.
+export function buildSession(block, dayIndex, week, athlete, rounding = 5, lastDone = null) {
   const day = block.days[dayIndex];
   if (!day) return null;
+  const seen = {};
   return {
     name: day.name,
     items: weekItems(block, dayIndex, week).map((item) => {
+      const nth = seen[item.exerciseId] = (seen[item.exerciseId] ?? -1) + 1;
+      const done = lastDone && !item.warmup && block.kind !== 'warmup' ? lastDone(item.exerciseId, nth) : null;
+      const actual = done ? fromActual(item, week, block, athlete, done, rounding) : null;
       const measure = measureOf(item);
       const reps = isCount(measure) ? prescribedReps(item, week) : null;
       const repsTo = isCount(measure) ? prescribedRepsTo(item, week) : null;
@@ -199,7 +267,12 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',
-        sets: Array.from({ length: n }, () => ({ reps, ...(repsTo != null ? { repsTo } : {}), secs, weight, ...(pct != null ? { pct } : {}), rpe: item.rpe ?? null, done: false })),
+        ...(actual ? { basedOn: done.week } : {}),
+        sets: Array.from({ length: n }, (_, j) => {
+          const a = actual?.[j] || {};
+          const r = a.reps ?? reps, rt = a.reps != null ? (a.repsTo ?? null) : repsTo, p = a.pct ?? pct;
+          return { reps: r, ...(rt != null ? { repsTo: rt } : {}), secs: a.secs ?? secs, weight: a.weight ?? weight, ...(p != null ? { pct: p } : {}), rpe: item.rpe ?? null, done: false };
+        }),
       };
     }),
   };
@@ -234,9 +307,9 @@ export function refreshEntries(entries, fresh) {
     if (k < 0) return untouchedEntry(e) ? null : e;
     used.add(k);
     const f = fresh[k];
-    if (untouchedEntry(e)) return { ...e, ...f };
+    if (untouchedEntry(e)) return { ...e, basedOn: undefined, ...f };
     return {
-      ...e, note: f.note, tempo: f.tempo, group: f.group, unit: f.unit,
+      ...e, note: f.note, tempo: f.tempo, group: f.group, unit: f.unit, basedOn: f.basedOn,
       // How the athlete chose to log it (reps, breaths, weight...) stays theirs.
       measure: e.athleteEdited ? e.measure : f.measure,
       sets: e.sets.map((s, j) => {
