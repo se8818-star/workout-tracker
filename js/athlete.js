@@ -3,7 +3,7 @@
 import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
@@ -158,7 +158,7 @@ function entryCard(log, entry, i, label) {
       <span class="order">${label}</span>
       <div class="entry-title"><h3>${esc(ex.name)}</h3>
         ${tags.length ? `<p class="tags">${esc(tags.join(' · '))}</p>` : ''}
-        ${ex.video ? `<button class="demo-chip" data-demo="${esc(ex.video)}" data-title="${esc(ex.name)}">▶ Watch demo</button>` : ''}
+        ${ex.video ? `<button class="demo-chip" ${demoAttrs(ex)}>▶ Watch demo</button>` : ''}
         ${lastTxt ? `<button class="last" data-action="history" data-i="${i}" aria-label="${esc(lastTxt)}. See all past sets">${esc(lastTxt)} <b>· History ›</b></button>` : ''}</div>
       <div class="entry-acts"><button class="chip" data-action="editEntry" data-i="${i}" aria-label="Change how you log ${esc(ex.name)}">Edit</button>
         <button class="chip" data-action="swap" data-i="${i}">Swap</button></div>
