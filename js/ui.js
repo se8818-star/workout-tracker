@@ -118,13 +118,15 @@ export function askFields(title, fields, { ok = 'Save', cancel = 'Cancel' } = {}
 // Exercise demo video in a pop-up over the app, so athletes never leave
 // their workout. Links the app can't play inside (some sites block it) get
 // a button that opens them in a new tab instead.
-export function demoSheet(link, title = 'Demo video') {
+// pw: the password some videos (Vimeo) ask for, shown under the player.
+export function demoSheet(link, title = 'Demo video', pw = '') {
   const e = embedFor(link);
   const open = `<a class="link small" href="${esc(link)}" target="_blank" rel="noopener">Open in a new tab ↗</a>`;
   const player = !e ? `<p class="ask-msg">This link can't play inside the app.</p><a class="btn wide" href="${esc(link)}" target="_blank" rel="noopener">Open video ↗</a>`
     : e.kind === 'file' ? `<video class="demo-video" src="${esc(e.src)}" controls playsinline autoplay></video>`
     : `<div class="demo-frame ${e.tall ? 'tall' : ''}"><iframe src="${esc(e.src)}" title="${esc(title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
-  const wrap = sheet(title, `${player}${e ? `<p class="demo-foot">${open}</p>` : ''}`);
+  const pass = pw ? `<p class="demo-pw">If the video asks for a password, it's <b>${esc(pw)}</b></p>` : '';
+  const wrap = sheet(title, `${player}${pass}${e ? `<p class="demo-foot">${open}</p>` : ''}`);
   wrap.classList.add('demo');
   return wrap;
 }
@@ -141,6 +143,9 @@ export function linkify(text) {
   }).join('');
 }
 
+// data- attributes for a button that plays an exercise's demo video.
+export const demoAttrs = (x) => `data-demo="${esc(x.video)}" data-title="${esc(x.name)}"${x.videoPassword ? ` data-pw="${esc(x.videoPassword)}"` : ''}`;
+
 // Any [data-demo] button anywhere opens its link in the demo pop-up (or a
 // new tab when the site won't play inside the app).
 export function demoLinks() {
@@ -148,11 +153,11 @@ export function demoLinks() {
     const el = ev.target.closest('[data-demo]');
     if (!el) return;
     ev.preventDefault();
-    if (!embedFor(el.dataset.demo)) {
+    if (!embedFor(el.dataset.demo) && !el.dataset.pw) {
       const w = window.open(el.dataset.demo, '_blank');
       if (w) { w.opener = null; return; }
     }
-    demoSheet(el.dataset.demo, el.dataset.title || 'Demo video');
+    demoSheet(el.dataset.demo, el.dataset.title || 'Demo video', el.dataset.pw || '');
   });
 }
 

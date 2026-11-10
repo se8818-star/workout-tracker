@@ -86,6 +86,18 @@ export function put(kind, obj) {
   return obj;
 }
 
+// Many records in one go (e.g. adding a whole exercise library): saves once.
+export function putMany(kind, objs) {
+  const at = new Date().toISOString();
+  for (const obj of objs) {
+    obj.updatedAt = at;
+    db[kind][obj.id] = obj;
+    db.dirty[`${kind}/${obj.id}`] = { n: mark() };
+  }
+  if (objs.length) save();
+  return objs;
+}
+
 // A deleted record keeps its contents on the server, so the database can still
 // tell whose it was and the athlete's phone hears about the delete too.
 export function del(kind, id) {
