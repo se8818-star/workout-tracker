@@ -3,6 +3,18 @@
 
 export const PATTERNS = ['squat', 'hinge', 'push', 'pull', 'carry', 'core', 'plyo', 'sprint', 'throw', 'other'];
 
+// Exercise library view: the exercises (already in name order) kept to one
+// movement type if `type` is set, in groups. Sorting by movement gives one
+// group per type in PATTERNS order (unknown types last, as "other"); sorting
+// by name gives a single group with no pattern, so no heading is drawn.
+export function libraryView(list, { sort = 'name', type = '' } = {}) {
+  const kept = type ? list.filter((e) => (PATTERNS.includes(e.pattern) ? e.pattern : 'other') === type) : list;
+  if (sort !== 'pattern') return kept.length ? [{ pattern: null, items: kept }] : [];
+  const groups = new Map(PATTERNS.map((p) => [p, []]));
+  for (const e of kept) groups.get(PATTERNS.includes(e.pattern) ? e.pattern : 'other').push(e);
+  return [...groups].filter(([, items]) => items.length).map(([pattern, items]) => ({ pattern, items }));
+}
+
 export const PLYO_TIERS = {
   1: 'Low (jumps in place)',
   2: 'Low-medium (standing jumps)',

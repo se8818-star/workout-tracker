@@ -290,3 +290,17 @@ test('assignment status: upcoming, current, ended by date or by running out of w
   assert.equal(assignmentStatus({ ...g, endDate: '2026-11-05' }, b, '2026-11-06'), 'ended');
   assert.equal(assignmentStatus(g, { kind: 'warmup', weeks: 1 }, '2026-12-25'), 'current');
 });
+
+test('libraryView sorts by name or groups by movement type, with a type filter', async () => {
+  const { libraryView } = await import('../js/calc.js');
+  const list = [
+    { name: 'Bench', pattern: 'push' }, { name: 'Deadlift', pattern: 'hinge' },
+    { name: 'Odd', pattern: 'weird' }, { name: 'Squat', pattern: 'squat' }, { name: 'Z press', pattern: 'push' },
+  ];
+  assert.deepEqual(libraryView(list).map((g) => [g.pattern, g.items.length]), [[null, 5]]);
+  assert.deepEqual(libraryView(list, { sort: 'pattern' }).map((g) => [g.pattern, g.items.map((e) => e.name)]),
+    [['squat', ['Squat']], ['hinge', ['Deadlift']], ['push', ['Bench', 'Z press']], ['other', ['Odd']]]);
+  assert.deepEqual(libraryView(list, { type: 'push' })[0].items.map((e) => e.name), ['Bench', 'Z press']);
+  assert.deepEqual(libraryView(list, { sort: 'pattern', type: 'other' }).map((g) => g.pattern), ['other']);
+  assert.deepEqual(libraryView(list, { type: 'carry' }), []);
+});
