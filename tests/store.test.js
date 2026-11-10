@@ -77,3 +77,15 @@ test('the program started last is the active one, and overlapping days follow it
   // Both programs have run all their weeks: nothing active.
   assert.equal(store.activeProgram('a', '2027-01-04'), null);
 });
+
+test('an empty switched-to day goes away once its program is removed', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('p', 'Prog'));
+  store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'p', startDate: '2026-11-09', weekdays: [0] });
+  const l = store.startLog('a', '2026-11-09', store.plannedOn('a', '2026-11-09')[0]);
+  store.saveLog({ ...l, switchedFrom: { week: 0, dayIndex: 0 } });
+  assert.ok(store.currentLog('a', '2026-11-09'));
+  store.del('assignments', 'g1');
+  store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p', startDate: '2026-11-09', weekdays: [1] });
+  assert.equal(store.currentLog('a', '2026-11-09'), null);
+});
