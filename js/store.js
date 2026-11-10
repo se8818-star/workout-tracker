@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -86,6 +86,18 @@ export function put(kind, obj) {
   return obj;
 }
 
+// Many records in one go (e.g. adding a whole exercise library): saves once.
+export function putMany(kind, objs) {
+  const at = new Date().toISOString();
+  for (const obj of objs) {
+    obj.updatedAt = at;
+    db[kind][obj.id] = obj;
+    db.dirty[`${kind}/${obj.id}`] = { n: mark() };
+  }
+  if (objs.length) save();
+  return objs;
+}
+
 // A deleted record keeps its contents on the server, so the database can still
 // tell whose it was and the athlete's phone hears about the delete too.
 export function del(kind, id) {
@@ -161,11 +173,11 @@ export function logsFor(athleteId) {
   return all('logs').filter((l) => l.athleteId === athleteId).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Every finished session where the athlete logged sets of an exercise before
-// a date, newest first: [{date, unit, sets, note}].
+// Every earlier session where the athlete ticked sets of an exercise, finished
+// or not (only ticked sets count), newest first: [{date, unit, sets, note}].
 export function exerciseHistory(athleteId, exerciseId, beforeIso) {
   const out = [];
-  for (const l of logsFor(athleteId).filter((x) => x.date < beforeIso && x.finished).reverse()) {
+  for (const l of logsFor(athleteId).filter((x) => x.date < beforeIso).reverse()) {
     for (const e of l.entries.filter((x) => x.exerciseId === exerciseId)) {
       const done = e.sets.filter((x) => x.done);
       if (done.length) out.push({ date: l.date, unit: e.unit, measure: e.measure || 'reps', sets: done, note: e.athleteNote || '' });
@@ -186,12 +198,16 @@ export function lastTime(athleteId, exerciseId, beforeIso) {
 const ownsLogs = () => demo || db.settings.me?.role !== 'coach';
 const keepLog = (log) => (ownsLogs() ? put('logs', log) : log);
 
+// What the athlete did before on this day of this program (or the program it
+// was copied from), so weekly rules build on their actual sets.
+const lastDone = (athleteId, block, dayIndex, week, beforeIso) => lastDoneFrom(logsFor(athleteId), block, dayIndex, week, beforeIso);
+
 // Start (or reopen) a log for a planned session.
 export function startLog(athleteId, iso, plan) {
   const existing = logFor(athleteId, iso);
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
-  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep());
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
   return keepLog({
     id: logId(athleteId, iso), athleteId, date: iso,
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
@@ -223,7 +239,8 @@ export function refreshLog(log) {
   const copy = asg && asg.blockId !== log.blockId && get('blocks', asg.blockId);
   const block = copy?.copiedFrom === log.blockId ? copy : get('blocks', log.blockId);
   if (!block) return log;
-  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep());
+  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep(),
+    log.warmup ? null : lastDone(log.athleteId, block, log.dayIndex, log.week, log.date));
   if (!s) return log;
   const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
   const name = log.warmup ? log.name : s.name;

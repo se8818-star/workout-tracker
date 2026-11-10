@@ -3,10 +3,11 @@
 import * as store from './store.js';
 import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
 import { pickExerciseSheet, videoSheet } from './athlete.js';
 import { TEMPLATES } from './templates.js';
+import { planLibraryImport } from './libimport.js';
 import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
 import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled } from './sync.js';
 
@@ -415,7 +416,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0) {
     <div class="item-measure"><div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
       ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps, demo video">Edit exercise ✎</a>` : ''}
-      ${x?.video ? `<button class="link small" data-demo="${esc(x.video)}" data-title="${esc(x.name)}">▶ Demo</button>` : ''}</div>
+      ${x?.video ? `<button class="link small" ${demoAttrs(x)}>▶ Demo</button>` : ''}</div>
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', nums.sets, 1, 1, nums.own.sets)}
       <span class="times" aria-hidden="true">×</span>
@@ -903,26 +904,29 @@ export function exercises(root, _p, query) {
       <label class="field-row"><span>Plyo intensity</span><select id="ex-tier"><option value="">–</option>${Object.entries(PLYO_TIERS).map(([k, v]) => `<option value="${k}" ${String(x.plyoTier) === k ? 'selected' : ''}>${k}: ${v}</option>`).join('')}</select></label>
       <label class="field-row"><span>Sprint meters per rep</span><input type="number" min="0" id="ex-meters" value="${x.metersPerRep ?? ''}"></label>
       <label class="field-row"><span>Demo video</span><input type="url" id="ex-video" value="${esc(x.video || '')}" placeholder="Paste a YouTube, Vimeo or Drive link"></label>
+      <label class="field-row"><span>Video password</span><input id="ex-video-pw" value="${esc(x.videoPassword || '')}" placeholder="Only if the video asks for one"></label>
       <p class="muted small ex-video-help">Athletes tap "Watch demo" on this exercise and it plays in a pop-up inside the app. <button class="link small" data-action="previewVideo">▶ Try it</button></p>
-      <fieldset><legend>Swap options (same movement)</legend><div class="checks tall">${list.filter((e) => e.id !== x.id).map((e) => `<label class="check-row"><input type="checkbox" name="alt" value="${e.id}" ${x.alts?.includes(e.id) ? 'checked' : ''}> ${esc(e.name)}</label>`).join('')}</div></fieldset>
+      <fieldset><legend>Swap options (same movement type)</legend><div class="checks tall">${list.filter((e) => e.id !== x.id && (e.pattern === x.pattern || x.alts?.includes(e.id))).map((e) => `<label class="check-row"><input type="checkbox" name="alt" value="${e.id}" ${x.alts?.includes(e.id) ? 'checked' : ''}> ${esc(e.name)}</label>`).join('')}</div></fieldset>
       <div class="row gap"><button class="btn" data-action="saveEx">Save</button><a class="btn ghost" href="${esc(back)}">Cancel</a></div>
       ${x.id ? `<button class="link danger-link" data-action="hideEx">Remove from library</button>` : ''}
     </section>` : '';
   root.innerHTML = `
     <header class="page-head"><h1>Exercise library</h1><p class="muted">${list.length} exercises. Plyo contacts and movement type drive the weekly numbers.</p></header>
     ${form}
+    <section class="card lib-card" id="lib-card" hidden></section>
     <div class="row gap"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises"><a class="btn" href="#/coach/exercises?edit=new">+ New</a></div>
     <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody>
-      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a>${e.video ? ` <button class="demo-mark" data-demo="${esc(e.video)}" data-title="${esc(e.name)}" aria-label="Watch the ${esc(e.name)} demo">▶</button>` : ''}</td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
+      ${list.map((e) => `<tr data-name="${esc(e.name.toLowerCase())}"><td><a href="#/coach/exercises?edit=${e.id}">${esc(e.name)}</a>${e.video ? ` <button class="demo-mark" ${demoAttrs(e)} aria-label="Watch the ${esc(e.name)} demo">▶</button>` : ''}</td><td>${PATTERN_LABEL[e.pattern] || e.pattern}</td><td>${loggedAs(e)}</td><td>${e.contactsPerRep ? `${e.contactsPerRep} (T${e.plyoTier})` : ''}</td><td>${e.alts?.length || 0}</td></tr>`).join('')}
     </tbody></table></div>`;
   const q = $('#ex-q', root);
   q.addEventListener('input', () => root.querySelectorAll('tr[data-name]').forEach((r) => { r.hidden = !r.dataset.name.includes(q.value.toLowerCase()); }));
   if (x) $('#ex-form', root).scrollIntoView({ block: 'start' });
+  else libraryCard(root);
   bindActions(root, {
     previewVideo: () => {
       const link = $('#ex-video', root).value.trim();
       if (!link) return toast('Paste a video link first');
-      demoSheet(link, $('#ex-name', root).value.trim() || 'Demo video');
+      demoSheet(link, $('#ex-name', root).value.trim() || 'Demo video', $('#ex-video-pw', root).value.trim());
     },
     // Hidden rather than deleted, so past workouts and programs keep its name.
     hideEx: async () => {
@@ -944,6 +948,7 @@ export function exercises(root, _p, query) {
         plyoTier: v('#ex-tier') ? Number(v('#ex-tier')) : undefined,
         metersPerRep: v('#ex-meters') ? Number(v('#ex-meters')) : undefined,
         video: v('#ex-video').trim() || undefined,
+        videoPassword: (v('#ex-video').trim() && v('#ex-video-pw').trim()) || undefined,
         alts: [...root.querySelectorAll('input[name=alt]:checked')].map((c) => c.value),
       };
       store.put('exercises', obj);
@@ -959,6 +964,27 @@ export function exercises(root, _p, query) {
       toast(changed.size ? `Saved. Updated ${changed.size} program${changed.size > 1 ? 's' : ''}.` : 'Saved');
       location.hash = back;
     },
+  });
+}
+
+// Offers the exercise video library (js/library.js, loaded only here) until
+// every exercise in it is in this team's library.
+async function libraryCard(root) {
+  const { VIDEO_LIBRARY } = await import('./library.js');
+  const card = $('#lib-card', root);
+  if (!card || !card.isConnected) return;
+  const plan = planLibraryImport(store.all('exercises'), VIDEO_LIBRARY);
+  if (!plan.add.length && !plan.update.length) return;
+  const parts = [plan.add.length && `${fmt(plan.add.length)} new exercises`, plan.update.length && `demo videos for ${plan.update.length} you already have`].filter(Boolean);
+  card.hidden = false;
+  card.innerHTML = `<h3>Exercise video library</h3>
+    <p class="muted small">${fmt(VIDEO_LIBRARY.length)} exercises from the CSP exercise video database, each with its demo video. Adds ${parts.join(' and ')}. Nothing you already have is duplicated, and videos you set yourself stay.</p>
+    <button class="btn" data-lib="add">Add video library</button>`;
+  card.querySelector('[data-lib]').addEventListener('click', async () => {
+    if (!await ask(`Adds ${parts.join(' and ')}. Movement types are guessed from the names, so check any you program with.`, { title: 'Add the video library?', ok: 'Add them' })) return;
+    store.putMany('exercises', [...plan.update, ...plan.add]);
+    toast(`Added ${parts.join(' and ')}`);
+    exercises(root, {}, new URLSearchParams());
   });
 }
 
