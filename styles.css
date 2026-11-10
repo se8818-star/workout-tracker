@@ -553,3 +553,20 @@ button.last b { color: var(--track); white-space: nowrap; }
 .plan-ex { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: var(--thin); padding: 10px 12px; background: #fff; }
 .coach-change { margin-top: 10px; width: 100%; }
 .plan-sep { border: 0; border-top: var(--thin); margin: 14px 0; }
+
+/* Who's on a program and where each assignment stands */
+.asg-state {
+  display: inline-block; padding: 0 5px; border: var(--thin); background: var(--card);
+  font: 600 0.6rem var(--mono); text-transform: uppercase; vertical-align: middle; white-space: normal;
+}
+.asg-state.active { background: var(--turf); color: var(--on-track); border-color: var(--turf); }
+.asg-state.warmup { background: var(--turf-soft); }
+.asg-state.hidden { background: var(--warn-soft); }
+.asg-state.ended { color: var(--muted); border-color: var(--muted); }
+.asg-row.ended b { color: var(--muted); }
+.who { margin: 6px 0 0; line-height: 1.8; }
+.who a { margin-right: 2px; }
+.block-row { align-items: flex-start; gap: 10px; }
+.block-row > div:first-child { min-width: 0; }
+.who-list { display: block; }
+.who-item { display: block; }

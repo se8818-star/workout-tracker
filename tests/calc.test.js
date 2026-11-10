@@ -271,3 +271,22 @@ test('quick entry reads rep ranges', () => {
   assert.deepEqual(parseQuickEntry('Bench 4x8–12 @185'), { name: 'Bench', sets: 4, reps: 8, repsTo: 12, weight: 185 });
   assert.deepEqual(parseQuickEntry('Bench 3x8'), { name: 'Bench', sets: 3, reps: 8 });
 });
+
+test('ticked sets count as logged work even without Finish', async () => {
+  const { loggedWork } = await import('../js/calc.js');
+  assert.equal(loggedWork(null), false);
+  assert.equal(loggedWork({ finished: false, entries: [{ sets: [{ done: false }] }] }), false);
+  assert.equal(loggedWork({ finished: false, entries: [{ sets: [{ done: true }] }] }), true);
+  assert.equal(loggedWork({ finished: true, entries: [] }), true);
+});
+
+test('assignment status: upcoming, current, ended by date or by running out of weeks', async () => {
+  const { assignmentStatus } = await import('../js/calc.js');
+  const b = { weeks: 2 };
+  const g = { startDate: '2026-11-02' };
+  assert.equal(assignmentStatus(g, b, '2026-11-01'), 'upcoming');
+  assert.equal(assignmentStatus(g, b, '2026-11-15'), 'current');
+  assert.equal(assignmentStatus(g, b, '2026-11-16'), 'ended');
+  assert.equal(assignmentStatus({ ...g, endDate: '2026-11-05' }, b, '2026-11-06'), 'ended');
+  assert.equal(assignmentStatus(g, { kind: 'warmup', weeks: 1 }, '2026-12-25'), 'current');
+});

@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
@@ -24,11 +24,11 @@ export function board(root, _p, query) {
     const w = weekSummary(a.id, mon);
     const trend = loadTrend(a.id, today());
     team.tonnage += w.done.tonnage; team.contacts += w.done.contacts; team.done += w.sessionsDone; team.planned += w.sessionsPlanned;
-    const lastNote = store.logsFor(a.id).filter((l) => l.finished && (l.note || l.entries.some((e) => e.athleteNote))).pop();
+    const lastNote = store.logsFor(a.id).filter((l) => loggedWork(l) && (l.note || l.entries.some((e) => e.athleteNote))).pop();
     const noteTxt = lastNote ? (lastNote.note || lastNote.entries.find((e) => e.athleteNote)?.athleteNote) : '';
     // Planned days gone by with nothing finished, less workouts done on other days (moved days aren't missed).
-    const undone = w.days.filter((d) => d.planned && d.iso < today() && !d.log?.finished).length;
-    const moved = w.days.filter((d) => !d.planned && d.iso <= today() && d.log?.finished).length;
+    const undone = w.days.filter((d) => d.planned && d.iso < today() && !loggedWork(d.log)).length;
+    const moved = w.days.filter((d) => !d.planned && d.iso <= today() && loggedWork(d.log)).length;
     const missed = Math.max(0, undone - moved);
     const flag = missed ? `<span class="pill warn">${missed} missed</span>` : (trend.ratio > 1.5 ? '<span class="pill warn">load spike</span>' : '');
     return `<tr>
@@ -74,10 +74,10 @@ export function athlete(root, { id }) {
   const ex = store.exercisesById();
   const u = store.unit();
   const w = weekSummary(id, weekStart(today()));
-  // Unfinished sessions and warmups still show here when they hold a form video,
-  // so a clip isn't hidden just because the athlete didn't tap Finish.
+  // Workouts with ticked sets show even if the athlete never tapped Finish, and
+  // warmups show when they hold a form video.
   const hasVid = (l) => l.entries.some((e) => e.sets.some((s) => videoFresh(s.video)));
-  const logs = store.logsFor(id).filter((l) => (l.finished && !l.warmup) || hasVid(l)).reverse().slice(0, 12);
+  const logs = store.logsFor(id).filter((l) => (loggedWork(l) && !l.warmup) || hasVid(l)).reverse().slice(0, 12);
   const loaded = store.all('exercises').filter((x) => x.loaded && !x.hidden).sort((x, y) => x.name.localeCompare(y.name));
   const asg = store.assignmentsFor(id);
   root.innerHTML = `
@@ -90,7 +90,8 @@ export function athlete(root, { id }) {
       ${stat('Session load', w.load, null, ' AU')}
     </div>
     <section class="card"><h3>Programs</h3>
-      ${asg.map((g) => { const b = store.get('blocks', g.blockId); const w = b && isWarmup(b); return `<div class="row between ${w ? 'asg-warm' : ''}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''}<br><small class="muted">from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap wrap">${w ? `<a class="chip" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="chip" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="chip" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
+      ${asg.map((g) => ({ g, b: store.get('blocks', g.blockId) })).map((x) => ({ ...x, s: x.b ? asgState(x.g, x.b) : { st: 'ended', txt: 'Program deleted' } }))
+        .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st]).map(({ g, b, s }) => { const w = b && isWarmup(b); const last = store.logsFor(id).filter((l) => l.assignmentId === g.id && loggedWork(l)).pop(); return `<div class="row between asg-row ${w ? 'asg-warm' : ''} ${s.st}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''} ${stateTag(s)}<br><small class="muted">${last ? `Last logged ${shortDate(last.date)} · ` : ''}from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap wrap">${w ? `<a class="chip" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="chip" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="chip" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
       <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
     </section>
     <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
@@ -150,12 +151,44 @@ export function athlete(root, { id }) {
 // same way. A coach loads one into program days, or assigns it to athletes like
 // a block; it then shows as its own card on the athlete's day, logged on its own.
 const isWarmup = (b) => b.kind === 'warmup';
+const shortDate = (iso) => fmtDate(iso, { month: 'short', day: 'numeric' });
+
+// Where one athlete's assignment stands today, for the coach's pages:
+// { st: 'active' | 'hidden' | 'upcoming' | 'ended' | 'warmup', txt }.
+// 'hidden' is a program whose dates are running but another program that
+// started later takes over the athlete's days, so they never see it.
+function asgState(g, b) {
+  const iso = today();
+  const st = assignmentStatus(g, b, iso);
+  if (st === 'upcoming') return { st, txt: `Starts ${shortDate(g.startDate)}` };
+  if (st === 'ended') {
+    const last = addDays(g.startDate, b.weeks * 7 - 1);
+    return { st, txt: `Ended ${shortDate(isWarmup(b) || (g.endDate && g.endDate < last) ? g.endDate : last)}` };
+  }
+  if (isWarmup(b)) return { st: 'warmup', txt: 'Running' };
+  const active = store.activeProgram(g.athleteId, iso)?.assignment.id === g.id;
+  const wk = `week ${Math.floor(daysBetween(g.startDate, iso) / 7) + 1} of ${b.weeks}`;
+  return active ? { st: 'active', txt: `Active now, ${wk}` } : { st: 'hidden', txt: `Overlaps a newer program, so it isn't shown (${wk})` };
+}
+const ORDER = { active: 0, warmup: 1, hidden: 2, upcoming: 3, ended: 4 };
+const stateTag = (s) => `<span class="asg-state ${s.st}">${esc(s.txt)}</span>`;
+
+// Everyone on a block, active first: [{ g, a, s }].
+function onBlock(blockId) {
+  const b = store.get('blocks', blockId);
+  return store.all('assignments').filter((g) => g.blockId === blockId)
+    .map((g) => ({ g, a: store.get('athletes', g.athleteId), s: asgState(g, b) }))
+    .filter((x) => x.a)
+    .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st] || x.a.name.localeCompare(y.a.name));
+}
+const whoLine = (list) => `<span class="who-list">${list.map(({ a, s }) => `<span class="who-item"><a href="#/coach/athlete/${a.id}">${esc(a.name)}</a> ${stateTag(s)}</span>`).join('')}</span>`;
 
 export function blocks(root) {
   const all = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
-  const row = (b, sub) => `<div class="card row between">
-      <a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${sub}</small></a>
-      <div class="row gap">${isWarmup(b) ? `<a class="chip" href="#/coach/assign?block=${b.id}">Assign</a>` : ''}<button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`;
+  const row = (b, sub) => { const who = onBlock(b.id); return `<div class="card row between block-row">
+      <div><a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${sub}</small></a>
+        <p class="small who">${who.length ? `<span class="muted">Assigned to</span>${whoLine(who)}` : '<span class="muted">Not assigned to anyone</span>'}</p></div>
+      <div class="row gap">${isWarmup(b) ? `<a class="chip" href="#/coach/assign?block=${b.id}">Assign</a>` : ''}<button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`; };
   const tpl = (t) => `<div class="card row between">
         <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
         <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`;
@@ -447,8 +480,8 @@ export function blockEditor(root, { id }, query) {
   if (stamped) store.put('blocks', b);
   const weekHasOwn = (w) => b.days.some((d) => d.items.some((it) => !it.warmup && hasOwn(it, w)));
   const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
-  const onIt = [...new Set(store.all('assignments').filter((g) => g.blockId === id).map((g) => store.get('athletes', g.athleteId)?.name).filter(Boolean))].sort();
-  const usedBy = onIt.length ? `<p class="assigned-note small">On this ${isWarmup(b) ? 'warmup' : 'program'}: <b>${esc(onIt.join(', '))}</b>. Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Edit next to the program on their page.</p>` : '';
+  const onIt = onBlock(id);
+  const usedBy = onIt.length ? `<p class="assigned-note small who">On this ${isWarmup(b) ? 'warmup' : 'program'}:${whoLine(onIt)} Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Edit next to the program on their page.</p>` : '';
   const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('');
   const dayCard = (di) => {
     const d = b.days[di];

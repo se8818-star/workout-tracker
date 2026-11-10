@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -588,7 +588,7 @@ export function week(root, { id }, query) {
 }
 
 export function history(root, { id }) {
-  const logs = store.logsFor(id).filter((l) => l.finished && !l.warmup).reverse();
+  const logs = store.logsFor(id).filter((l) => loggedWork(l) && !l.warmup).reverse();
   const ex = store.exercisesById();
   const u = store.unit();
   const athlete = store.get('athletes', id);
@@ -600,8 +600,8 @@ export function history(root, { id }) {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
       return `<a class="card log-row" href="#/athlete/${id}/session/${l.date}">
-        <div><b>${esc(l.name)}</b><p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
+        <div><b>${esc(l.name)}</b>${l.finished ? '' : ' <small class="muted">not finished</small>'}<p class="muted">${fmtDate(l.date)} · RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min</p>
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
         <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
-    }).join('') || '<p class="empty">No finished sessions yet.</p>'}`;
+    }).join('') || '<p class="empty">No logged sessions yet.</p>'}`;
 }
