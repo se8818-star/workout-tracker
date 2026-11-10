@@ -609,6 +609,31 @@ export function week(root, { id }, query) {
 }
 
 // Where a max came from: "est. from 185 × 5, Nov 3" or "typed in".
+
+// One exercise at a time: a dropdown of exercises (ones with a max first,
+// showing it) and the chosen one's max below. `edit` adds a box to change it.
+const pickedMax = {};
+export function maxPicker(a, ex, u, { edit = false, choices = [] } = {}) {
+  const maxes = a?.maxes || {};
+  const name = (k) => ex[k]?.name || k;
+  const withMax = Object.keys(maxes).sort((x, y) => name(x).localeCompare(name(y)));
+  const rest = edit ? choices.map((x) => x.id).filter((k) => maxes[k] == null) : [];
+  const ids = [...withMax, ...rest];
+  if (!ids.length) return '';
+  let k = pickedMax[a.id];
+  if (!ids.includes(k)) k = ids[0];
+  pickedMax[a.id] = k;
+  const v = maxes[k];
+  const opt = (x) => `<option value="${esc(x)}" ${x === k ? 'selected' : ''}>${esc(name(x))}${maxes[x] != null ? ` · ${fmt(store.showW(maxes[x], u), 1)} ${u}` : ''}</option>`;
+  return `<div class="max-pick">
+    <select data-action="pickMax" data-athlete="${esc(a.id)}" aria-label="Exercise">${withMax.map(opt).join('')}${rest.length ? `<option disabled>── No max yet ──</option>${rest.map(opt).join('')}` : ''}</select>
+    <div class="max-show"><span class="stat-label">${esc(name(k))}</span>
+      ${edit ? `<label class="max-edit"><input type="number" inputmode="decimal" step="any" value="${v != null ? store.showW(v, u) : ''}" placeholder="No max yet" data-action="setMax" data-ex="${esc(k)}" aria-label="Max for ${esc(name(k))}"><span>${u}</span></label>`
+        : `<b class="stat-value">${fmt(store.showW(v, u), 1)} <small>${u}</small></b>`}
+      <small class="max-src">${v != null ? maxSource(a, k, u) : 'Type a number to set one, or it fills in after a logged set.'}</small></div></div>`;
+}
+export const pickMax = (el) => { pickedMax[el.dataset.athlete] = el.value; };
+
 export function maxSource(a, k, u = store.unit()) {
   const m = a?.maxInfo?.[k];
   return m?.est ? `est. from ${fmt(store.showW(m.weight, u), 1)} ${u} × ${m.reps}${m.date ? `, ${fmtDate(m.date, { month: 'short', day: 'numeric' })}` : ''}` : 'typed in';
@@ -623,7 +648,7 @@ export function history(root, { id }) {
   const maxes = Object.entries(athlete?.maxes || {});
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<h1>History</h1></header>
-    ${maxes.length ? `<section class="card"><h3>Current maxes</h3><ul class="kv">${maxes.map(([k, v]) => `<li><span>${esc(ex[k]?.name || k)}<small class="muted max-src">${maxSource(athlete, k, u)}</small></span><b>${fmt(store.showW(v), 1)} ${u}</b></li>`).join('')}</ul></section>` : ''}
+    ${maxes.length ? `<section class="card"><h3>Current maxes</h3>${maxPicker(athlete, ex, u)}</section>` : ''}
     ${logs.map((l) => {
       const t = sessionTotals(l, ex, true);
       const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
@@ -632,4 +657,5 @@ export function history(root, { id }) {
         ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}</div>
         <div class="right"><b>${fmt(store.showW(t.tonnage))}</b> <small>${u}</small><br><b>${fmt(t.contacts)}</b> <small>contacts</small></div></a>`;
     }).join('') || '<p class="empty">No logged sessions yet.</p>'}`;
+  bindActions(root, { pickMax: (el) => { pickMax(el); history(root, { id }); } });
 }
