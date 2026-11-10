@@ -229,6 +229,12 @@ export function startLog(athleteId, iso, plan) {
   });
 }
 
+// What a planned day would hold if opened now, without saving a log (Today's preview).
+export function previewEntries(athleteId, iso, plan) {
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, get('athletes', athleteId), roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
+  return s ? sessionEntries(s, unit()) : [];
+}
+
 export function startWarmupLog(athleteId, iso, w) {
   const existing = warmupLogFor(athleteId, iso);
   if (existing && existing.blockId === w.block.id) return existing;

@@ -18,51 +18,80 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function board(root, _p, query) {
   const mon = weekStart(query.get('d') || today());
-  const athletes = store.all('athletes').sort((a, b) => (a.group || '').localeCompare(b.group || '') || a.name.localeCompare(b.name));
+  const isNow = mon === weekStart(today());
+  const show = query.get('show') || '';
+  const groups = [...new Set(store.all('athletes').map((a) => a.group).filter(Boolean))].sort();
+  const group = query.get('g') || '';
+  const athletes = store.all('athletes').filter((a) => !group || a.group === group);
   const u = store.unit();
+  const t = today();
   let team = { tonnage: 0, contacts: 0, done: 0, planned: 0 };
-  const rows = athletes.map((a) => {
+  const counts = { today: 0, due: 0, missed: 0 };
+  const people = athletes.map((a) => {
     const w = weekSummary(a.id, mon);
-    const trend = loadTrend(a.id, today());
+    const trend = loadTrend(a.id, t);
     team.tonnage += w.done.tonnage; team.contacts += w.done.contacts; team.done += w.sessionsDone; team.planned += w.sessionsPlanned;
     const lastNote = store.logsFor(a.id).filter((l) => loggedWork(l) && (l.note || l.entries.some((e) => e.athleteNote))).pop();
     const noteTxt = lastNote ? (lastNote.note || lastNote.entries.find((e) => e.athleteNote)?.athleteNote) : '';
     // Planned days gone by with nothing finished, less workouts done on other days (moved days aren't missed).
-    const undone = w.days.filter((d) => d.planned && d.iso < today() && !loggedWork(d.log)).length;
-    const moved = w.days.filter((d) => !d.planned && d.iso <= today() && loggedWork(d.log)).length;
-    const missed = Math.max(0, undone - moved);
-    const flag = missed ? `<span class="pill warn">${missed} missed</span>` : (trend.ratio > 1.5 ? '<span class="pill warn">load spike</span>' : '');
-    return `<tr>
-      <td><a href="#/coach/athlete/${a.id}"><b>${esc(a.name)}</b></a><br><small class="muted">${esc(a.group || '')}${hasLogin(a.id) === false ? `${a.group ? ' · ' : ''}not signed up yet` : ''}</small></td>
-      <td>${w.sessionsDone}/${w.sessionsPlanned} ${flag}</td>
-      <td>${fmt(store.showW(w.done.tonnage))}</td>
-      <td>${fmt(w.done.contacts)}</td>
-      <td>${fmt(w.load)}</td>
-      <td class="note-cell">${noteTxt ? `“${esc(noteTxt)}”<br><small class="muted">${fmtDate(lastNote.date, { month: 'short', day: 'numeric' })}</small>` : ''}</td>
-    </tr>`;
-  }).join('');
+    const undone = w.days.filter((d) => d.planned && d.iso < t && !loggedWork(d.log));
+    const moved = w.days.filter((d) => !d.planned && d.iso <= t && loggedWork(d.log)).length;
+    const missed = Math.max(0, undone.length - moved);
+    const td = w.days.find((d) => d.iso === t);
+    const trainedToday = isNow && td && loggedWork(td.log);
+    const dueToday = isNow && td && td.planned && !loggedWork(td.log);
+    if (trainedToday) counts.today++;
+    if (dueToday) counts.due++;
+    if (missed) counts.missed++;
+    // One dot a day: done, missed, planned (today outlined), or nothing.
+    const dots = w.days.map((d) => {
+      const c = loggedWork(d.log) ? 'd' : d.planned && d.iso < t && missed ? 'm' : d.iso === t && d.planned ? 't' : d.planned ? 'p' : '';
+      return `<i class="${c}" title="${fmtDate(d.iso)}"></i>`;
+    }).join('');
+    const firstMiss = missed ? undone[0] : null;
+    const flag = missed ? `<span class="pill red">Missed ${missed > 1 ? missed : fmtDate(firstMiss.iso, { weekday: 'short' })}</span>`
+      : trend.ratio > 1.5 ? '<span class="pill warn">Load spike</span>'
+      : trainedToday ? '<span class="pill green">Trained today</span>' : '';
+    const initials = a.name.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+    const html = `<a href="#/coach/athlete/${a.id}"><span class="avatar">${esc(initials)}</span>
+      <span class="grow"><span class="name">${esc(a.name)}</span><span class="dots" aria-label="${w.sessionsDone} of ${w.sessionsPlanned} sessions">${dots}</span>
+        ${noteTxt ? `<span class="sub" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">“${esc(noteTxt)}”</span>` : hasLogin(a.id) === false ? '<span class="sub">Not signed up yet</span>' : ''}</span>
+      <span class="right">${flag || `${w.sessionsDone}/${w.sessionsPlanned}`}</span><span class="chev"></span></a>`;
+    return { a, html, missed, trainedToday, dueToday, rank: missed ? 0 : dueToday ? 1 : trainedToday ? 3 : 2 };
+  });
+  const filtered = people.filter((p) => (show === 'missed' ? p.missed : show === 'due' ? p.dueToday : show === 'today' ? p.trainedToday : true))
+    .sort((x, y) => x.rank - y.rank || x.a.name.localeCompare(y.a.name));
+  const q = (o) => { const p = new URLSearchParams({ d: mon, ...(group ? { g: group } : {}), ...(show ? { show } : {}), ...o }); for (const [k, v] of [...p]) if (!v) p.delete(k); return `#/coach?${p}`; };
+  const tile = (key, label, n, bad = false) => `<a href="${q({ show: show === key ? '' : key })}" class="${bad && n ? 'bad' : ''} ${show === key ? 'on' : ''}"><span class="stat-label">${label}</span><b>${n}</b></a>`;
   root.innerHTML = `
-    <header class="page-head"><h1>Team this week</h1>
-      <div class="row gap"><a class="chip" href="#/coach?d=${addDays(mon, -7)}">‹ Prev</a><span class="muted">${fmtDate(mon, { month: 'short', day: 'numeric' })}</span><a class="chip" href="#/coach?d=${addDays(mon, 7)}">Next ›</a></div></header>
-    <div class="stats">
-      ${stat('Sessions done', team.done, null, ` / ${team.planned}`)}
-      ${stat('Team tonnage', store.showW(team.tonnage), null, ` ${u}`)}
-      ${stat('Team plyo contacts', team.contacts)}
-    </div>
-    <div class="card scroll-x"><table class="tbl board">
-      <thead><tr><th>Athlete</th><th>Sessions</th><th>Tonnage (${u})</th><th>Contacts</th><th>Load (AU)</th><th>Latest note</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="6" class="muted">No athletes yet.</td></tr>'}</tbody></table></div>
-    <div class="row gap wrap">
-      <a class="btn" href="#/coach/assign">Assign a program</a>
-      <button class="btn ghost" data-action="addAthlete">+ Add athlete</button>
-    </div>`;
+    <header class="page-head"><div class="head-row"><div><span class="kicker">${isNow ? 'This week' : 'Week of'} · ${fmtDate(mon, { month: 'short', day: 'numeric' })}</span><h1>Team</h1></div>
+      <div class="row gap"><span class="week-nav"><a class="icon-btn" href="${q({ d: addDays(mon, -7) })}" aria-label="Previous week">‹</a><a class="icon-btn" href="${q({ d: addDays(mon, 7) })}" aria-label="Next week">›</a></span>
+      <button class="round-btn" data-action="plus" aria-label="Add">+</button></div></div></header>
+    ${isNow ? `<div class="attention">${tile('today', 'Trained today', counts.today)}${tile('due', 'Still to go', counts.due)}${tile('missed', 'Missed', counts.missed, true)}</div>`
+      : `<div class="attention">${tile('missed', 'Missed', counts.missed, true)}<div><span class="stat-label">Sessions</span><b>${team.done}<small class="muted" style="font-size:0.9rem"> / ${team.planned}</small></b></div><div><span class="stat-label">Athletes</span><b>${athletes.length}</b></div></div>`}
+    <div class="list-head" style="margin-top:18px"><span>${filtered.length} athlete${filtered.length === 1 ? '' : 's'}${show ? ` · <a href="${q({ show: '' })}">show all</a>` : ''}</span>
+      ${groups.length > 1 ? `<select data-action="group" aria-label="Group" style="width:auto;min-height:34px;padding:4px 10px"><option value="">All groups</option>${groups.map((g) => `<option ${g === group ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>` : ''}</div>
+    ${filtered.length ? `<div class="list">${filtered.map((p) => p.html).join('')}</div>` : `<p class="empty">${athletes.length ? 'Nobody here right now.' : '<b>No athletes yet</b>Tap + to add one, or share the team code from More.'}</p>`}
+    <div class="card team-totals"><div><span class="stat-label">Sessions</span><b>${team.done} / ${team.planned}</b></div><div><span class="stat-label">Volume</span><b>${fmt(store.showW(team.tonnage))} ${u}</b></div><div style="text-align:right"><span class="stat-label">Plyo contacts</span><b>${fmt(team.contacts)}</b></div></div>`;
+  const addAthlete = async () => {
+    const f = await askFields('Add athlete', [{ k: 'name', label: 'Name' }, { k: 'group', label: 'Group', placeholder: 'e.g. Pitchers' }], { ok: 'Add athlete' });
+    if (!f) return;
+    store.put('athletes', { id: store.uid('ath'), name: f.name, group: f.group, maxes: {} });
+    if (cloudEnabled) toast(`Added. When ${f.name} signs up with the team code, they pick their name and get what you assigned.`);
+    board(root, _p, query);
+  };
   bindActions(root, {
-    addAthlete: async () => {
-      const f = await askFields('Add athlete', [{ k: 'name', label: 'Name' }, { k: 'group', label: 'Group', placeholder: 'e.g. Pitchers' }], { ok: 'Add athlete' });
-      if (!f) return;
-      store.put('athletes', { id: store.uid('ath'), name: f.name, group: f.group, maxes: {} });
-      if (cloudEnabled) toast(`Added. When ${f.name} signs up with the team code, they pick their name and get what you assigned.`);
-      board(root, _p, query);
+    group: (el) => { location.hash = q({ g: el.value }); },
+    plus: () => {
+      sheet('Add', `<ul class="menu-list"><li><a href="#/coach/assign">Assign a program</a></li><li><button data-m="athlete">Add an athlete</button></li><li><button data-m="block">New program</button></li></ul>`, (w) => {
+        w.addEventListener('click', (ev) => {
+          const b = ev.target.closest('[data-m]'); if (!b) return;
+          closeSheet();
+          if (b.dataset.m === 'athlete') return addAthlete();
+          const nb = store.put('blocks', { id: store.uid('block'), name: 'New program', weeks: 4, deloadWeek: null, days: [{ name: 'Day 1', items: [] }] });
+          location.hash = `#/coach/block/${nb.id}`;
+        });
+      });
     },
   });
 }
@@ -70,7 +99,7 @@ export function board(root, _p, query) {
 // ---------- athlete detail ----------
 
 
-export function athlete(root, { id }) {
+export function athlete(root, { id }, query = new URLSearchParams()) {
   store.fillMaxes(id);
   const a = store.get('athletes', id);
   if (!a) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
@@ -83,44 +112,67 @@ export function athlete(root, { id }) {
   const logs = store.logsFor(id).filter((l) => (loggedWork(l) && !l.warmup) || hasVid(l)).reverse().slice(0, 12);
   const loaded = store.all('exercises').filter((x) => x.loaded && !x.hidden).sort((x, y) => x.name.localeCompare(y.name));
   const asg = store.assignmentsFor(id);
-  root.innerHTML = `
-    <header class="page-head"><a class="back" href="#/coach">‹ Team</a><h1>${esc(a.name)}</h1><p class="muted">${esc(a.group || '')}</p>
-      <div class="row gap"><a class="chip" href="#/athlete/${id}">Open athlete view</a><a class="chip" href="#/athlete/${id}/week">Weekly numbers</a></div></header>
-    <div class="stats">
-      ${stat('Sessions', w.sessionsDone, null, ` / ${w.sessionsPlanned}`)}
-      ${stat('Tonnage', store.showW(w.done.tonnage), null, ` ${u}`)}
-      ${stat('Plyo contacts', w.done.contacts)}
-      ${stat('Session load', w.load, null, ' AU')}
-    </div>
-    <section class="card"><h3>Programs</h3>
-      ${asg.map((g) => ({ g, b: store.get('blocks', g.blockId) })).map((x) => ({ ...x, s: x.b ? asgState(x.g, x.b) : { st: 'ended', txt: 'Program deleted' } }))
-        .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st]).map(({ g, b, s }) => { const w = b && isWarmup(b); const last = store.logsFor(id).filter((l) => l.assignmentId === g.id && loggedWork(l)).pop(); return `<div class="row between asg-row ${w ? 'asg-warm' : ''} ${s.st}"><span><b>${esc(b?.name || '?')}</b>${w ? ' <small class="tag-warm">Warmup</small>' : ''} ${stateTag(s)}<br><small class="muted">${last ? `Last logged ${shortDate(last.date)} · ` : ''}from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''} · ${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}</small></span><span class="row gap wrap">${w ? `<a class="chip" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="chip" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="chip" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="chip" data-action="unassign" data-id="${g.id}">Remove</button></span></div>`; }).join('') || '<p class="muted">No program assigned.</p>'}
-      <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a>
-    </section>
-    <section class="card"><div class="row between"><h3>Maxes (${u})</h3>${unitSeg(u)}</div>
-      ${maxPicker(a, ex, u, { edit: true, choices: loaded })}
-      <p class="muted small">Worked out for you from logged lifts (rep-max formula, sets of ${EST_MAX_REPS} reps or fewer). A new best raises a max by up to 20%; bigger jumps are flagged below for you to check. Type a number to set a max yourself; it stays until a logged set beats it. Clear the box to remove that max.</p>
-    </section>
-    <section class="card"><h3>Recent sessions and notes</h3>
-      ${logs.map((l) => {
+  const tab = ['overview', 'program', 'maxes', 'log'].includes(query.get('tab')) ? query.get('tab') : 'overview';
+  const initials = a.name.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+  const asgs = asg.map((g) => ({ g, b: store.get('blocks', g.blockId) })).map((x) => ({ ...x, s: x.b ? asgState(x.g, x.b) : { st: 'ended', txt: 'Program deleted' } }))
+    .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st]);
+  const asgCard = ({ g, b, s }) => {
+    const w = b && isWarmup(b);
+    const last = store.logsFor(id).filter((l) => l.assignmentId === g.id && loggedWork(l)).pop();
+    const wkNow = b && !w && s.st === 'active' ? Math.floor(daysBetween(g.startDate, today()) / 7) + 1 : null;
+    return `<div class="asg-card asg-row ${s.st}">
+      <div class="row between"><b>${esc(b?.name || '?')}${w ? ' <small class="tag-warm">Warmup</small>' : ''}</b>${stateTag(s.st === 'active' ? { st: 'active', txt: 'Active' } : s)}</div>
+      ${wkNow ? `<div class="row between small muted" style="margin-top:6px"><span>Week ${wkNow} of ${b.weeks}</span><span>ends ${shortDate(g.endDate || addDays(g.startDate, b.weeks * 7 - 1))}</span></div><div class="prog-bar"><i style="width:${Math.min(100, Math.round((daysBetween(g.startDate, today()) + 1) / (b.weeks * 7) * 100))}%"></i></div>` : ''}
+      <small class="muted">${last ? `Last logged ${shortDate(last.date)} · ` : ''}${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}${s.st !== 'active' ? ` · from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''}` : ''}</small>
+      <div class="asg-acts">${w ? `<a class="link" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="link" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="link" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="link muted-link" data-action="unassign" data-id="${g.id}">Remove</button></div></div>`;
+  };
+  const current = asgs.filter((x) => x.s.st === 'active' || x.s.st === 'warmup');
+  const days = w.days.map((d) => `<span class="day ${d.iso === today() ? 'today on' : ''} ${d.planned ? 'planned' : ''} ${loggedWork(d.log) ? 'done' : ''}" style="min-height:0"><span>${fmtDate(d.iso, { weekday: 'narrow' })}</span><b style="width:30px;height:30px;font-size:0.88rem">${Number(d.iso.slice(8))}</b><i></i></span>`).join('');
+  const logHtml = (list) => list.map((l) => {
         const t = sessionTotals(l, ex, true);
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
         const vids = l.entries.flatMap((e) => e.sets.map((s, j) => (videoFresh(s.video) ? `<button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ ${esc(ex[e.exerciseId]?.name || '')} · set ${j + 1}</button>` : ''))).join('');
-        return `<div class="log-item"><div class="row between"><span><a class="log-open" href="#/athlete/${id}/${l.warmup ? 'warmup' : 'session'}/${l.date}"><b>${esc(l.name)}</b> ›</a>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted">${fmtDate(l.date)}</span></div>
-          <p class="muted small">RPE ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u} · ${fmt(t.contacts)} contacts${l.switchedFrom ? ' · switched day' : ''}</p>
+        return `<div class="log-item"><div class="row between"><span><a class="log-open" href="#/athlete/${id}/${l.warmup ? 'warmup' : 'session'}/${l.date}">${esc(l.name)}</a>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted small">${fmtDate(l.date)}</span></div>
+          <p class="muted small">Effort ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u}${t.contacts ? ` · ${fmt(t.contacts)} contacts` : ''}${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
           ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}
-          ${(l.maxFlags || []).map((f) => `<p class="small warn-text">Check: ${esc(ex[f.exerciseId]?.name || '')} suggests a max of ${fmt(store.showW(f.est))} ${u}. Not saved; change it above if it's real.</p>`).join('')}
+          ${(l.maxFlags || []).map((f) => `<p class="small warn-text">Check: ${esc(ex[f.exerciseId]?.name || '')} suggests a max of ${fmt(store.showW(f.est))} ${u}. Not saved; change it on the Maxes tab if it's real.</p>`).join('')}
           ${vids ? `<div class="row gap wrap vids">${vids}</div>` : ''}</div>`;
-      }).join('') || '<p class="muted">Nothing logged yet.</p>'}
-    </section>
-    <section class="card"><h3>Remove from team</h3>
-      <p class="muted small">${esc(a.name.split(' ')[0])} loses access right away. Their programs, logs and notes are deleted. To come back they'd need the team code again.</p>
-      <button class="btn ghost wide danger" data-action="removeAthlete">Remove ${esc(a.name)}</button>
-    </section>`;
-  bindActions(root, {
+      }).join('') || '<p class="muted">Nothing logged yet.</p>';
+  const views = {
+    overview: `
+      <section class="card"><div class="row between"><h3 style="margin:0">This week</h3><span class="muted small">${w.sessionsDone} of ${w.sessionsPlanned} · ${fmt(store.showW(w.done.tonnage))} ${u}</span></div>
+        <div class="date-strip" style="margin:8px -6px 0">${days}</div></section>
+      <section class="card">${current.length ? current.map(asgCard).join('') : '<p class="muted">No program running right now.</p>'}
+        <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a></section>
+      <div class="list-head"><span>Recent sessions</span><a href="#/coach/athlete/${id}?tab=log">See all</a></div>
+      <section class="card">${logHtml(logs.slice(0, 3))}</section>`,
+    program: `<section class="card">${asgs.map(asgCard).join('') || '<p class="muted">No program assigned.</p>'}
+      <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a></section>`,
+    maxes: `<section class="card"><div class="row between"><h3 style="margin:0">Maxes</h3>${unitSeg(u)}</div>
+      ${maxPicker(a, ex, u, { edit: true, choices: loaded })}
+      <p class="muted small">Worked out for you from logged lifts (rep-max formula, sets of ${EST_MAX_REPS} reps or fewer). A new best raises a max by up to 20%; bigger jumps are flagged in the log for you to check. Type a number to set a max yourself; it stays until a logged set beats it. Clear the box to remove that max.</p></section>`,
+    log: `<div class="stats">
+      ${stat('Sessions this week', w.sessionsDone, null, ` / ${w.sessionsPlanned}`)}
+      ${stat('Volume', store.showW(w.done.tonnage), null, ` ${u}`)}
+      ${stat('Plyo contacts', w.done.contacts)}
+      ${stat('Session load', w.load, null, ' AU')}</div>
+      <section class="card">${logHtml(logs)}</section>`,
+  };
+  root.innerHTML = `
+    <header class="page-head"><div class="row between"><a class="back" href="#/coach">Team</a><button class="more-btn" data-action="menu" aria-label="More">•••</button></div>
+      <div class="row gap" style="gap:12px;margin-top:4px"><span class="avatar big">${esc(initials)}</span><div style="min-width:0"><h1 style="font-size:1.9rem">${esc(a.name)}</h1>
+        <p class="muted small">${esc([a.group, current.find((x) => !isWarmup(x.b || {}))?.g.weekdays?.map((d) => WEEKDAYS[d]).join(', ')].filter(Boolean).join(' · trains '))}</p></div></div></header>
+    <nav class="tabs-seg" aria-label="Sections">${[['overview', 'Overview'], ['program', 'Program'], ['maxes', 'Maxes'], ['log', 'Log']].map(([k, label]) => `<a href="#/coach/athlete/${id}${k === 'overview' ? '' : `?tab=${k}`}" class="${tab === k ? 'on' : ''}">${label}</a>`).join('')}</nav>
+    ${views[tab]}`;
+  const handlers = {
+    menu: () => sheet(a.name, `<ul class="menu-list"><li><a href="#/athlete/${id}">Open athlete view</a></li><li><a href="#/athlete/${id}/week">Weekly numbers</a></li><li><a href="#/coach/assign?athlete=${id}">Assign a program</a></li></ul>
+      <div class="menu-gap"></div><ul class="menu-list"><li><button class="danger" data-m="remove">Remove from team</button></li></ul>
+      <p class="muted small" style="margin-top:10px">Removing cuts off ${esc(a.name.split(' ')[0])}'s access and deletes their programs, logs and notes.</p>`, (wr) => {
+      wr.querySelector('[data-m="remove"]').addEventListener('click', () => { closeSheet(); handlers.removeAthlete(); });
+    }),
     removeAthlete: async () => {
       if (!await ask(`${a.name} loses access right away. Their programs, logs and notes are deleted too. This can't be undone.`, { title: `Remove ${a.name}?`, ok: 'Remove from team', danger: true })) return;
       try { await removeAthleteLogin(id); } catch (e) { toast(`Couldn't remove: ${e.message}`); return; }
@@ -137,13 +189,14 @@ export function athlete(root, { id }) {
       // A removed max isn't estimated again from the lifts already logged,
       // only from new ones.
       if ((el.value === '' || !Number(el.value)) && a.maxes?.[k] == null) return;
-      if (el.value === '' || !Number(el.value)) { delete a.maxes[k]; a.maxInfo = { ...a.maxInfo, [k]: { cleared: today() } }; store.put('athletes', a); toast('Max removed'); athlete(root, { id }); return; }
-      a.maxes[k] = store.readW(Number(el.value)); a.maxInfo = { ...a.maxInfo }; delete a.maxInfo[k]; store.put('athletes', a); toast('Max saved'); athlete(root, { id });
+      if (el.value === '' || !Number(el.value)) { delete a.maxes[k]; a.maxInfo = { ...a.maxInfo, [k]: { cleared: today() } }; store.put('athletes', a); toast('Max removed'); athlete(root, { id }, query); return; }
+      a.maxes[k] = store.readW(Number(el.value)); a.maxInfo = { ...a.maxInfo }; delete a.maxInfo[k]; store.put('athletes', a); toast('Max saved'); athlete(root, { id }, query);
     },
-    setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }); },
-    pickMax: (el) => { pickMax(el); athlete(root, { id }); },
-    unassign: async (el) => { if (await ask('Logged sessions stay.', { title: 'Remove this program?', ok: 'Remove program', danger: true })) { store.del('assignments', el.dataset.id); athlete(root, { id }); } },
-  });
+    setUnits: (el) => { store.setSetting('units', el.dataset.v); athlete(root, { id }, query); },
+    pickMax: (el) => { pickMax(el); athlete(root, { id }, query); },
+    unassign: async (el) => { if (await ask('Logged sessions stay.', { title: 'Remove this program?', ok: 'Remove program', danger: true })) { store.del('assignments', el.dataset.id); athlete(root, { id }, query); } },
+  };
+  bindActions(root, handlers);
 }
 
 // ---------- blocks ----------
@@ -186,29 +239,35 @@ const whoLine = (list) => `<span class="who-list">${list.map(({ a, s }) => `<spa
 
 export function blocks(root) {
   const all = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
-  const row = (b, sub) => { const who = onBlock(b.id); return `<div class="card row between block-row">
-      <div><a href="#/coach/block/${b.id}"><b>${esc(b.name)}</b><br><small class="muted">${sub}</small></a>
-        <p class="small who">${who.length ? `<span class="muted">Assigned to</span>${whoLine(who)}` : '<span class="muted">Not assigned to anyone</span>'}</p></div>
-      <div class="row gap">${isWarmup(b) ? `<a class="chip" href="#/coach/assign?block=${b.id}">Assign</a>` : ''}<button class="chip" data-action="dup" data-id="${b.id}">Copy</button><button class="chip" data-action="del" data-id="${b.id}">Delete</button></div></div>`; };
-  const tpl = (t) => `<div class="card row between">
-        <span><b>${esc(t.name)}</b><br><small class="muted">${esc(t.about)}</small></span>
-        <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></div>`;
+  // Who's on it, as one line: "4 athletes · 4 active now". Tap to see each person.
+  const whoSum = (who) => {
+    if (!who.length) return '<span class="who-sum">Not assigned to anyone</span>';
+    const active = who.filter((x) => x.s.st === 'active' || x.s.st === 'warmup').length;
+    const wk = who.find((x) => x.s.st === 'active')?.s.txt.match(/week \d+ of \d+/)?.[0];
+    return `<details class="who-sum"><summary>${who.length} athlete${who.length === 1 ? '' : 's'}${active ? ` · ${active} active${wk && active === who.length ? `, ${wk}` : ''}` : ''}</summary><p class="small who">${whoLine(who)}</p></details>`;
+  };
+  const row = (b, sub) => `<div class="card block-row">
+      <div class="row between"><h3 style="margin:0"><a href="#/coach/block/${b.id}">${esc(b.name)}</a></h3>
+        <button class="more-btn" data-action="menu" data-id="${b.id}" aria-label="More for ${esc(b.name)}">•••</button></div>
+      <small class="muted">${sub}</small>
+      ${whoSum(onBlock(b.id))}
+      <div class="asg-acts" style="margin-top:6px"><a class="link" href="#/coach/block/${b.id}">Edit</a><a class="link" href="#/coach/assign?block=${b.id}">Assign</a></div></div>`;
+  const tpl = (t) => `<li><span class="grow"><span class="name">${esc(t.name)}</span><br><span class="sub">${esc(t.about)}</span></span>
+        <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></li>`;
   root.innerHTML = `
-    <header class="page-head"><h1>Programs and blocks</h1><p class="muted">Build a block once, then assign it to anyone.</p></header>
-    ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${b.weeks} weeks · ${b.days.length} days/week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('')}
-    <button class="btn" data-action="new">+ New block</button>
-    <h2 class="sec-head">Warmups</h2>
-    <p class="muted">Assign a warmup to athletes and it shows up as its own card above their workout. You can also load one into a program day from that day's Warmup section.</p>
+    <header class="page-head"><div class="head-row"><h1>Programs</h1><button class="round-btn" data-action="new" aria-label="New program">+</button></div>
+      <p class="muted">Build a program once, then assign it to anyone.</p></header>
+    ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${b.weeks} weeks · ${b.days.length} days a week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('') || '<p class="empty"><b>No programs yet</b>Tap + or start from a template below.</p>'}
+    <div class="list-head" style="margin-top:26px"><span>Warmups</span><button class="link" data-action="newWarmup">+ New warmup</button></div>
+    <p class="muted small" style="margin:0 4px 10px">Assign a warmup and it shows above the athlete's workout. You can also load one into a program day.</p>
     ${all.filter(isWarmup).map((b) => row(b, `${b.days[0]?.items.length || 0} exercises`)).join('')}
-    <button class="btn ghost" data-action="newWarmup">+ New warmup</button>
     <section class="templates">
-      <h3>Start from a template</h3>
-      ${TEMPLATES.filter((t) => !t.kind).map(tpl).join('')}
-      ${TEMPLATES.filter((t) => t.kind === 'warmup').map(tpl).join('')}
+      <div class="list-head"><span>Start from a template</span></div>
+      <ul class="list">${TEMPLATES.filter((t) => !t.kind).map(tpl).join('')}${TEMPLATES.filter((t) => t.kind === 'warmup').map(tpl).join('')}</ul>
     </section>`;
-  bindActions(root, {
+  const handlers = {
     new: () => {
-      const b = store.put('blocks', { id: store.uid('block'), name: 'New block', weeks: 4, deloadWeek: null, days: [{ name: 'Day 1', items: [] }] });
+      const b = store.put('blocks', { id: store.uid('block'), name: 'New program', weeks: 4, deloadWeek: null, days: [{ name: 'Day 1', items: [] }] });
       location.hash = `#/coach/block/${b.id}`;
     },
     newWarmup: () => {
@@ -228,6 +287,17 @@ export function blocks(root) {
       toast(`Added "${b.name}". Assign it from here when you're ready.`);
       location.hash = `#/coach/block/${b.id}`;
     },
+    menu: (el) => {
+      const b = store.get('blocks', el.dataset.id);
+      sheet(b.name, `<ul class="menu-list"><li><a href="#/coach/block/${b.id}">Edit</a></li><li><a href="#/coach/assign?block=${b.id}">Assign</a></li><li><button data-m="dup">Make a copy</button></li></ul>
+        <div class="menu-gap"></div><ul class="menu-list"><li><button class="danger" data-m="del">Delete ${isWarmup(b) ? 'warmup' : 'program'}</button></li></ul>`, (w) => {
+        w.addEventListener('click', (ev) => {
+          const m = ev.target.closest('[data-m]'); if (!m) return;
+          closeSheet();
+          handlers[m.dataset.m]({ dataset: { id: b.id } });
+        });
+      });
+    },
     dup: (el) => {
       const b = structuredClone(store.get('blocks', el.dataset.id));
       b.id = store.uid('block'); b.name += ' (copy)';
@@ -240,7 +310,8 @@ export function blocks(root) {
       if (!await ask(msg, { title: warm ? 'Delete this warmup?' : 'Delete this block?', ok: 'Delete', danger: true })) return;
       store.del('blocks', el.dataset.id); blocks(root);
     },
-  });
+  };
+  bindActions(root, handlers);
 }
 
 function findExercise(name) {
@@ -390,7 +461,7 @@ function progressionSheet(b, text, scope, done) {
   });
 }
 
-function itemRow(item, di, ii, ex, label, b = null, week = 0) {
+function itemRow(item, di, ii, ex, label, b = null, week = 0, open = true) {
   const x = ex[item.exerciseId];
   const wk = week && !item.warmup ? week : 0;
   const nums = weekNumbers(item, b, wk);
@@ -402,17 +473,21 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0) {
   // Less-used settings stay folded away unless one is already in use.
   const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
   const off = !item.warmup && b && offInWeek(item, week);
-  return `<div class="item ${off ? 'item-off' : ''}" data-di="${di}" data-ii="${ii}">
-    ${off ? `<p class="wk-note small"><b>Left out of week ${week + 1}.</b> <button class="link" data-action="weekReset">Put back</button></p>` : ''}
+  const sum = off ? `Left out of week ${week + 1}` : itemSummary(item, b, wk);
+  return `<div class="item ${off ? 'item-off' : ''} ${open ? '' : 'folded'}" data-di="${di}" data-ii="${ii}" ${open ? '' : 'data-action="itemToggle"'}>
     <div class="item-top">
       <span class="item-n">${esc(label)}</span>
-      <button class="item-name" data-action="itemPick" title="Change exercise">${esc(x?.name || item.exerciseId)}</button>
+      ${open ? `<button class="item-name" data-action="itemPick" title="Change exercise">${esc(x?.name || item.exerciseId)}</button>
       ${x?.contactsPerRep ? `<span class="pill">${x.contactsPerRep}c/rep · T${x.plyoTier}</span>` : ''}
       <span class="spacer"></span>
       <button class="icon-btn" data-action="itemUp" title="Move up" aria-label="Move up">↑</button>
       <button class="icon-btn" data-action="itemDown" title="Move down" aria-label="Move down">↓</button>
-      <button class="icon-btn" data-action="itemDel" title="Remove" aria-label="Remove">✕</button>
+      <button class="icon-btn" data-action="itemDel" title="Remove" aria-label="Remove">✕</button>`
+      : `<span class="item-head-text"><b>${esc(x?.name || item.exerciseId)}</b><span class="item-sum">${esc(sum)}</span></span>`}
+      <button class="icon-btn item-toggle" data-action="itemToggle" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(x?.name || 'exercise')}"></button>
     </div>
+    <div class="item-body">
+    ${off ? `<p class="wk-note small"><b>Left out of week ${week + 1}.</b> <button class="link" data-action="weekReset">Put back</button></p>` : ''}
     <div class="item-measure"><div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
       ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps, demo video">Edit exercise ✎</a>` : ''}
@@ -448,8 +523,31 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0) {
         <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
       </div>
     </details>
+    </div>
   </div>`;
 }
+
+// How an exercise reads when folded: "4 × 5 @ 75% · +2.5% a week".
+function itemSummary(item, b, wk) {
+  const n = weekNumbers(item, b, wk);
+  const m = measureOf(item);
+  if (m === 'none') return 'Check off, no sets';
+  const u = item.unit || store.unit();
+  let t = `${n.sets ?? '?'} × ${m === 'time' ? fmtSecsShort(n.secs) : `${repsText(n.reps, n.repsTo) || '?'}${m === 'breaths' ? ' breaths' : ''}`}`;
+  if (item.pct != null) t += ` @ ${n.pct}%${item.maxFrom ? ` of ${store.get('exercises', item.maxFrom)?.name || 'max'}` : ''}`;
+  else if (item.weight != null) t += ` · ${fmt(store.showW(n.weight, u), 1)} ${u}`;
+  const p = item.progression;
+  if (p && p.type !== 'none' && p.step) {
+    t += ` · ${{ add_pct: `+${p.step}%`, add_weight: `+${fmt(store.showW(p.step, u), 1)} ${u}`, add_reps: `+${p.step} rep${p.step === 1 ? '' : 's'}`, add_secs: `+${p.step} s` }[p.type] || ''} a week`;
+  }
+  if (item.tempo) t += ` · tempo ${item.tempo}`;
+  return t;
+}
+const fmtSecsShort = (n) => (!n ? '? s' : n < 60 ? `${n} s` : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`);
+
+// Which exercises are open in the program editor (per visit). Everything
+// else reads as one line; new exercises open so their numbers can be set.
+const openItems = new Set();
 
 function plannedDayTotals(block, di, week) {
   const ex = store.exercisesById();
@@ -482,8 +580,9 @@ export function blockEditor(root, { id }, query) {
   const weekHasOwn = (w) => b.days.some((d) => d.items.some((it) => !it.warmup && hasOwn(it, w)));
   const warmups = store.all('blocks').filter(isWarmup).sort((x, y) => x.name.localeCompare(y.name));
   const onIt = onBlock(id);
-  const usedBy = onIt.length ? `<p class="assigned-note small who">On this ${isWarmup(b) ? 'warmup' : 'program'}:${whoLine(onIt)} Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Edit next to the program on their page.</p>` : '';
-  const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`) : '')).join('');
+  const usedBy = onIt.length ? `<details class="assigned-note small who-sum"><summary>${onIt.length} athlete${onIt.length === 1 ? '' : 's'} on this ${isWarmup(b) ? 'warmup' : 'program'}</summary><p class="who">${whoLine(onIt)}</p><p class="muted">Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Change workouts on their page.</p></details>` : '';
+  const isOpen = (di, ii) => openItems.has(`${id}:${di}:${ii}`);
+  const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`, null, 0, isOpen(di, ii)) : '')).join('');
   const dayCard = (di) => {
     const d = b.days[di];
     return `
@@ -491,8 +590,8 @@ export function blockEditor(root, { id }, query) {
         <div class="row between gap">
           <input class="day-name" value="${esc(d.name)}" data-action="dayName" data-di="${di}" aria-label="Day name">
           <div class="row gap">
-            <button class="chip" data-action="dayCopy" data-di="${di}">Copy day</button>
-            <button class="chip" data-action="dayDel" data-di="${di}">Delete</button>
+            <button class="chip" data-action="foldAll" data-di="${di}">${d.items.some((_, ii) => isOpen(di, ii)) ? 'Fold all' : 'Open all'}</button>
+            <button class="more-btn" data-action="dayMenu" data-di="${di}" aria-label="More for this day">•••</button>
           </div>
         </div>
         <p class="muted small day-tot" data-di="${di}">${dayLine(dayTots[di])}</p>
@@ -508,7 +607,7 @@ export function blockEditor(root, { id }, query) {
         </div>
         <div class="sec">
           <h4>Workout</h4>
-          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length), b, week))).join('')}
+          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length), b, week, isOpen(di, ii)))).join('')}
         </div>
         <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
         <details class="quick-wrap"><summary>Or type a list</summary>
@@ -521,7 +620,7 @@ export function blockEditor(root, { id }, query) {
   };
 
   root.innerHTML = isWarmup(b) ? `
-    <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
+    <header class="page-head"><a class="back" href="#/coach/blocks">Programs</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Warmup name"></header>
     ${usedBy}
     <p class="muted small">A saved warmup. <a href="#/coach/assign?block=${b.id}">Assign it</a> to athletes, or load it into a program day from that day's Warmup section. Changes here reach assigned athletes on days they haven't started yet, but not programs that already loaded a copy.</p>
@@ -529,7 +628,7 @@ export function blockEditor(root, { id }, query) {
       ${warmItems(b.days[0], 0)}
       <button class="chip" data-action="itemAdd" data-di="0" data-warm="1">+ Warmup exercise</button>
     </div></section>` : `
-    <header class="page-head"><a class="link" href="#/coach/blocks">‹ All blocks</a>
+    <header class="page-head"><a class="back" href="#/coach/blocks">Programs</a>
       <input class="title-input" value="${esc(b.name)}" data-action="blockName" aria-label="Block name"></header>
     ${usedBy}
     <section class="card row gap wrap">
@@ -557,7 +656,7 @@ export function blockEditor(root, { id }, query) {
     ${b.days.length > 1 ? `<label class="side-pick">Side by side with
       <select data-action="pickOther"><option value="">Nothing</option>${b.days.map((d, di) => (di === day ? '' : `<option value="${di}" ${di === other ? 'selected' : ''}>${esc(d.name || `Day ${di + 1}`)}</option>`)).join('')}</select></label>` : ''}
     <div class="day-cols ${other != null ? 'two' : ''}">${b.days.length ? [day, other].filter((di) => di != null).map(dayCard).join('') : '<p class="empty">No days yet. Tap "+ Day".</p>'}</div>
-    <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this block</a>`;
+    <a class="btn wide" href="#/coach/assign?block=${b.id}">Assign this program</a>`;
 
   // Keep the open week's tab in sight on long programs.
   const wt = $('.week-tabs', root), on = wt?.querySelector('.on');
@@ -583,6 +682,7 @@ export function blockEditor(root, { id }, query) {
     history.replaceState(null, '', `#/coach/block/${id}?${q}`);
     blockEditor(root, { id }, q);
   };
+  const swapOpen = (di, x, y) => { const kx = `${id}:${di}:${x}`, ky = `${id}:${di}:${y}`; const ox = openItems.has(kx), oy = openItems.has(ky); openItems.delete(kx); openItems.delete(ky); if (ox) openItems.add(ky); if (oy) openItems.add(kx); };
   const itemOf = (el) => { const r = el.closest('.item'); return { di: Number(r.dataset.di), ii: Number(r.dataset.ii) }; };
   const num = (v) => (v === '' ? null : Number(v));
   // Show which numbers are this week's own without a redraw.
@@ -593,7 +693,7 @@ export function blockEditor(root, { id }, query) {
     const note = el.closest('.item')?.querySelector('.wk-note'); if (note) note.innerHTML = weekNote(it, b, week);
   };
 
-  bindActions(root, {
+  const handlers = {
     blockName: (el) => { b.name = el.value; save(false); },
     weeks: (el) => { b.weeks = Math.max(1, Number(el.value) || 1); if (b.deloadWeek >= b.weeks) b.deloadWeek = null; save(); },
     deload: (el) => { b.deloadWeek = el.value === '' ? null : Number(el.value); save(); },
@@ -725,6 +825,24 @@ export function blockEditor(root, { id }, query) {
         save();
       }, { allowNew: true });
     },
+    itemToggle: (el, ev) => {
+      if (el.classList.contains('item') && ev.target.closest('button:not(.item-toggle), a, input, select, textarea')) return;
+      const { di, ii } = itemOf(el), k = `${id}:${di}:${ii}`;
+      if (openItems.has(k)) openItems.delete(k); else openItems.add(k);
+      save();
+    },
+    foldAll: (el) => {
+      const di = Number(el.dataset.di), keys = b.days[di].items.map((_, ii) => `${id}:${di}:${ii}`);
+      const anyOpen = keys.some((k) => openItems.has(k));
+      keys.forEach((k) => (anyOpen ? openItems.delete(k) : openItems.add(k)));
+      save();
+    },
+    dayMenu: (el) => {
+      const di = Number(el.dataset.di);
+      sheet(b.days[di].name || `Day ${di + 1}`, `<ul class="menu-list"><li><button data-m="dayCopy">Copy this day</button></li></ul><div class="menu-gap"></div><ul class="menu-list"><li><button class="danger" data-m="dayDel">Delete this day</button></li></ul>`, (w) => {
+        w.addEventListener('click', (ev) => { const m = ev.target.closest('[data-m]'); if (!m) return; closeSheet(); handlers[m.dataset.m]({ dataset: { di: String(di) } }); });
+      });
+    },
     itemAdd: (el) => {
       const di = Number(el.dataset.di);
       const warm = Boolean(el.dataset.warm);
@@ -732,6 +850,9 @@ export function blockEditor(root, { id }, query) {
         const a = b.days[di].items;
         // Warmup exercises stay together at the top of the day.
         const at = warm ? a.filter((x) => x.warmup).length : a.length;
+        // Open state follows positions, so shift the ones below the new exercise.
+        for (let k = a.length - 1; k >= at; k--) if (openItems.delete(`${id}:${di}:${k}`)) openItems.add(`${id}:${di}:${k + 1}`);
+        openItems.add(`${id}:${di}:${at}`);
         a.splice(at, 0, newItem(exId, warm));
         save();
         root.querySelector(`.item[data-di="${di}"][data-ii="${at}"]`)?.scrollIntoView({ block: 'center' });
@@ -768,9 +889,9 @@ export function blockEditor(root, { id }, query) {
       toast('Warmup copied to every day');
     },
     // Moves stay inside the item's own section (warmup or workout).
-    itemUp: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii > 0 && !a[ii - 1].warmup === !a[ii].warmup) { [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]]; save(); } },
-    itemDown: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii < a.length - 1 && !a[ii + 1].warmup === !a[ii].warmup) { [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]]; save(); } },
-    itemDel: (el) => { const { di, ii } = itemOf(el); b.days[di].items.splice(ii, 1); save(); },
+    itemUp: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii > 0 && !a[ii - 1].warmup === !a[ii].warmup) { [a[ii - 1], a[ii]] = [a[ii], a[ii - 1]]; swapOpen(di, ii, ii - 1); save(); } },
+    itemDown: (el) => { const { di, ii } = itemOf(el); const a = b.days[di].items; if (ii < a.length - 1 && !a[ii + 1].warmup === !a[ii].warmup) { [a[ii + 1], a[ii]] = [a[ii], a[ii + 1]]; swapOpen(di, ii, ii + 1); save(); } },
+    itemDel: (el) => { const { di, ii } = itemOf(el); const n = b.days[di].items.length; b.days[di].items.splice(ii, 1); openItems.delete(`${id}:${di}:${ii}`); for (let k = ii + 1; k < n; k++) if (openItems.delete(`${id}:${di}:${k}`)) openItems.add(`${id}:${di}:${k - 1}`); save(); },
     quickAdd: (el) => {
       const di = Number(el.dataset.di);
       const ta = root.querySelector(`textarea[data-di="${di}"]`);
@@ -794,7 +915,8 @@ export function blockEditor(root, { id }, query) {
       save();
       if (bad.length) toast(`Couldn't read: ${bad.join('; ')}. Use "Name 3x5 @80%" or "Name 3x10-15".`);
     },
-  });
+  };
+  bindActions(root, handlers);
 }
 
 // ---------- assign ----------
@@ -929,9 +1051,9 @@ export function exercises(root, _p, query) {
     <header class="page-head"><h1>Exercise library</h1><p class="muted">${list.length} exercises. Plyo contacts and movement type drive the weekly numbers.</p></header>
     ${form}
     <section class="card lib-card" id="lib-card" hidden></section>
-    <div class="row gap"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises"><a class="btn" href="#/coach/exercises?edit=new">+ New</a></div>
+    <div class="row gap" style="margin-bottom:10px"><input type="search" class="search" id="ex-q" placeholder="Search" aria-label="Search exercises" style="margin:0"><a class="round-btn" href="#/coach/exercises?edit=new" aria-label="New exercise" title="New exercise">+</a></div>
     <div class="row gap wrap lib-view">
-      <button class="btn ghost filter-btn" id="ex-filter-btn" aria-expanded="false" aria-controls="ex-filters">Filter <b id="ex-filter-n"></b></button>
+      <button class="chip filter-btn" id="ex-filter-btn" aria-expanded="false" aria-controls="ex-filters">Filter <b id="ex-filter-n"></b></button>
       <label class="lib-pick"><span>Sort</span><select id="ex-sort"><option value="name" ${view.sort === 'name' ? 'selected' : ''}>Name A–Z</option><option value="pattern" ${view.sort === 'pattern' ? 'selected' : ''}>Movement type</option></select></label>
     </div>
     <section class="card filter-panel" id="ex-filters" hidden>
@@ -942,7 +1064,7 @@ export function exercises(root, _p, query) {
       <div class="row between"><button class="link" id="ex-filter-clear">Clear all</button><button class="btn" id="ex-filter-done">Done</button></div>
     </section>
     <p class="muted small" id="ex-showing"></p>
-    <div class="card"><table class="tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody id="ex-rows">
+    <div class="card" style="padding:4px 4px"><table class="tbl lib-tbl"><thead><tr><th>Name</th><th>Movement</th><th>Logged as</th><th>Contacts/rep</th><th>Swaps</th></tr></thead><tbody id="ex-rows">
     </tbody></table></div>`;
   const q = $('#ex-q', root);
   const sortSel = $('#ex-sort', root);
