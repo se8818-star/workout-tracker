@@ -233,6 +233,23 @@ function rpeButtons(val) {
 export function warmupSession(root, params) { session(root, { ...params, warm: true }); }
 
 // The workout page: every exercise in order with boxes for weight and reps.
+// Effort / minutes / note in one line, e.g. "Effort 7/10 · 45 min · “felt good”".
+function sessionSummary(log) {
+  return [log.sessionRpe ? `Effort ${log.sessionRpe}/10` : '', log.minutes ? `${log.minutes} min` : '', log.note ? `“${esc(log.note)}”` : '']
+    .filter(Boolean).join(' · ');
+}
+
+// A finished workout ends with a plain card instead of the pinned Finish bar,
+// so nothing floats over the exercises once the work is done.
+function finishedCard(log, warm) {
+  const summary = sessionSummary(log);
+  return `<div class="card finished-card">
+      <div class="fc-head"><span class="fc-check" aria-hidden="true">✓</span><b>${warm ? 'Warmup' : 'Workout'} finished</b></div>
+      ${summary ? `<p class="muted small">${summary}</p>` : ''}
+      <button class="btn ghost" data-action="openFinish">Edit effort and notes</button>
+    </div>`;
+}
+
 export function session(root, { id, date, warm = false }) {
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
@@ -266,8 +283,9 @@ export function session(root, { id, date, warm = false }) {
       return head + entryCard(log, e, i, labels[i], folds[i]);
     }).join('')}
     <button class="btn ghost wide" data-action="addExercise">+ Add an exercise</button>
-    ${log.note || log.sessionRpe ? `<p class="muted small" style="margin-top:14px">${log.sessionRpe ? `Effort ${log.sessionRpe}/10` : ''}${log.minutes ? ` · ${log.minutes} min` : ''}${log.note ? ` · “${esc(log.note)}”` : ''}</p>` : ''}
-    <div class="finish-bar"><button class="btn ${log.finished ? 'ghost' : 'dark'}" data-action="openFinish">${log.finished ? 'Edit effort and notes' : `Finish ${warm ? 'warmup' : 'workout'}`}</button></div>`;
+    ${log.finished ? finishedCard(log, warm)
+      : `${log.note || log.sessionRpe ? `<p class="muted small" style="margin-top:14px">${sessionSummary(log)}</p>` : ''}
+    <div class="finish-bar"><button class="btn dark" data-action="openFinish">Finish ${warm ? 'warmup' : 'workout'}</button></div>`}`;
 
   const rerender = () => { const y = window.scrollY; session(root, { id, date, warm }); window.scrollTo(0, y); };
   const persist = () => store.saveLog(log);
