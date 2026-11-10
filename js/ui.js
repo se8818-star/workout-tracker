@@ -82,6 +82,20 @@ export function ask(message, { title = 'Are you sure?', ok = 'OK', cancel = 'Can
   });
 }
 
+// A pop-up with several answers. options: [{ v, label, sub? }]. Resolves the
+// picked option's v, or null on Cancel / ✕ / backdrop.
+export function choose(title, message, options, { cancel = 'Cancel' } = {}) {
+  return new Promise((resolve) => {
+    const wrap = sheet(title, `${message ? `<p class="ask-msg">${esc(message)}</p>` : ''}
+      <div class="choose-opts">${options.map((o, i) => `<button class="btn ${i ? 'ghost' : ''} choose-opt" data-v="${i}"><b>${esc(o.label)}</b>${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`).join('')}</div>
+      <div class="ask-btns"><button class="btn ghost" data-close>${esc(cancel)}</button></div>`);
+    wrap.classList.add('ask');
+    wrap._onClose = () => resolve(null);
+    wrap.querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', () => { wrap._onClose = null; closeSheet(); resolve(options[Number(b.dataset.v)].v); }));
+    wrap.querySelector('[data-v]')?.focus();
+  });
+}
+
 // In-app replacement for prompt(). fields: [{ k, label, value, placeholder }]. Resolves { k: value } or null.
 export function askFields(title, fields, { ok = 'Save', cancel = 'Cancel' } = {}) {
   return new Promise((resolve) => {

@@ -535,3 +535,23 @@ button.last b { color: var(--track); white-space: nowrap; }
 .prog-table tbody th { position: sticky; left: 0; background: #fff; font: 700 0.8rem var(--body); border-right: var(--hair); }
 .prog-table tbody th small { display: block; font-weight: 400; color: var(--muted); }
 .prog-sheet .sheet { max-width: 760px; }
+
+/* Choose pop-up (e.g. "just this week" or "rest of the program") */
+.choose-opts { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.choose-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; text-align: left; }
+.choose-opt small { font-family: var(--mono); font-size: 0.66rem; font-weight: 500; text-transform: none; opacity: 0.85; }
+
+/* One athlete's program, changed week by week */
+.item-off { opacity: 0.55; }
+.item-off .wk-note { opacity: 1; }
+.plan-item { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+.plan-item.off { opacity: 0.55; border-style: dashed; }
+.plan-item h3 { margin: 0; font-size: 1.02rem; }
+.plan-item .plan-nums { font-family: var(--mono); font-size: 0.78rem; }
+.plan-item .plan-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.day-tab.now::after { content: " · now"; font-family: var(--mono); font-size: 0.6rem; }
+.plan-fields { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.plan-fields .item-main { display: flex; gap: 8px; align-items: flex-end; }
+.plan-ex { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: var(--thin); padding: 10px 12px; background: #fff; }
+.coach-change { margin-top: 10px; width: 100%; }
+.plan-sep { border: 0; border-top: var(--thin); margin: 14px 0; }

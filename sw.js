@@ -5,7 +5,7 @@ const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/athlete.js', 'js/coach.js', 'js/calc.js', 'js/config.js', 'js/seed.js',
   'js/store.js', 'js/summary.js', 'js/sync.js', 'js/templates.js', 'js/ui.js', 'js/progression.js', 'js/video.js',
-  'js/libimport.js', 'js/library.js',
+  'js/libimport.js', 'js/library.js', 'js/plan.js',
 ];
 
 self.addEventListener('install', (e) => {

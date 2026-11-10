@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, e1rm, logsWeight, repsText, weekItems, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
@@ -10,9 +10,11 @@ const today = () => toISO(new Date());
 // A finished workout raises a max by at most this factor on its own.
 const MAX_JUMP = 1.2;
 
+const isCoach = () => store.settings().me?.role === 'coach';
+
 // A coach looking at an athlete's pages gets a way back to that athlete's coach page.
 function coachBack(id) {
-  if (store.settings().me?.role !== 'coach') return '';
+  if (!isCoach()) return '';
   const a = store.get('athletes', id);
   return `<a class="back" href="#/coach/athlete/${id}">‹ ${esc(a?.name || 'Athlete')}</a>`;
 }
@@ -101,7 +103,7 @@ export function today_(root, { id }, query) {
     body = workoutCard(id, iso, log.name, block ? `${block.name} · Week ${log.week + 1}` : 'Workout', log.entries.length, log);
   } else if (plans.length) {
     const p = plans[0];
-    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · Deload' : ''}`, p.block.days[p.dayIndex].items.length, null);
+    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}${p.block.deloadWeek === p.week ? ' · Deload' : ''}`, weekItems(p.block, p.dayIndex, p.week).length, null);
   } else {
     body = `<div class="empty"><p><b>Rest day.</b> Nothing is scheduled.</p>
       <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
@@ -206,6 +208,7 @@ export function session(root, { id, date, warm = false }) {
       <a class="back" href="#/athlete/${id}?d=${date}">‹ ${fmtDate(date)}</a>
       <span class="kicker">${esc(warm ? 'Before your workout' : block ? `${block.name} · Week ${log.week + 1}` : '')}</span>
       <div class="row between"><h1>${esc(warm ? 'Warmup' : log.name)}</h1>${warm ? '' : '<button class="chip" data-action="switch">Switch</button>'}</div>
+      ${!warm && isCoach() && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program ›</a>` : ''}
     </header>
     ${warm ? log.entries.map((e, i) => entryCard(log, e, i, labels[i])).join('') : log.entries.map((e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
