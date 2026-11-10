@@ -201,15 +201,20 @@ export function startWarmupLog(athleteId, iso, w) {
 
 // Pick up coach edits made to the block since this log was started (see
 // refreshEntries). Finished logs are history and stay as they were.
+// When the coach gave this athlete their own copy of the program
+// (block.copiedFrom), a workout already started follows the copy.
 export function refreshLog(log) {
-  const block = log && !log.finished && get('blocks', log.blockId);
+  if (!log || log.finished) return log;
+  const asg = log.assignmentId && get('assignments', log.assignmentId);
+  const copy = asg && asg.blockId !== log.blockId && get('blocks', asg.blockId);
+  const block = copy?.copiedFrom === log.blockId ? copy : get('blocks', log.blockId);
   if (!block) return log;
   const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep());
   if (!s) return log;
   const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
   const name = log.warmup ? log.name : s.name;
-  if (name === log.name && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
-  return keepLog({ ...log, name, entries });
+  if (name === log.name && block.id === log.blockId && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
+  return keepLog({ ...log, name, entries, blockId: block.id });
 }
 
 // The day's log as it should be now. A log the athlete only opened (nothing

@@ -160,13 +160,29 @@ export function repsText(reps, repsTo, dash = '–') {
 // The reps a planned set counts for in totals: the middle of a range.
 export const planReps = (lo, hi) => (hi != null && hi > lo ? Math.round((lo + hi) / 2) : lo);
 
+// A week can also leave an exercise out (byWeek[week].off) or use another
+// exercise in its place (byWeek[week].exerciseId), set from an athlete's
+// program page with "just this week" or "rest of the program".
+export const offInWeek = (item, week) => Boolean(item.byWeek?.[week]?.off);
+export const exerciseInWeek = (item, week) => item.byWeek?.[week]?.exerciseId || item.exerciseId;
+
+// The items a day has in one week, each with that week's exercise.
+export function weekItems(block, dayIndex, week) {
+  const day = block.days[dayIndex];
+  if (!day) return [];
+  return day.items.filter((it) => !offInWeek(it, week)).map((it) => {
+    const exId = exerciseInWeek(it, week);
+    return exId === it.exerciseId ? it : { ...it, exerciseId: exId };
+  });
+}
+
 // Build the concrete session for one athlete: block day + week -> rows with sets.
 export function buildSession(block, dayIndex, week, athlete, rounding = 5) {
   const day = block.days[dayIndex];
   if (!day) return null;
   return {
     name: day.name,
-    items: day.items.map((item) => {
+    items: weekItems(block, dayIndex, week).map((item) => {
       const measure = measureOf(item);
       const reps = isCount(measure) ? prescribedReps(item, week) : null;
       const repsTo = isCount(measure) ? prescribedRepsTo(item, week) : null;
@@ -207,12 +223,15 @@ export const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e
 // log: a log nobody has written in yet is rebuilt outright; otherwise each
 // set the athlete hasn't touched picks up the new targets, and anything they
 // logged stays as it is.
+// An exercise the coach took out (or swapped) that the athlete hadn't
+// started goes away; one the coach added shows up at the end.
 export function refreshEntries(entries, fresh) {
   if (entries.every(untouchedEntry)) return fresh;
   const used = new Set();
-  return entries.map((e) => {
+  const out = entries.map((e) => {
     const k = fresh.findIndex((f, i) => !used.has(i) && (f.exerciseId === e.exerciseId || f.exerciseId === e.swappedFrom));
-    if (e.addedByAthlete || k < 0) return e;
+    if (e.addedByAthlete) return e;
+    if (k < 0) return untouchedEntry(e) ? null : e;
     used.add(k);
     const f = fresh[k];
     if (untouchedEntry(e)) return { ...e, ...f };
@@ -228,7 +247,8 @@ export function refreshEntries(entries, fresh) {
           ...(t.targetPct != null && !e.swappedFrom ? { targetPct: t.targetPct } : {}), rpe: t.rpe };
       }),
     };
-  });
+  }).filter(Boolean);
+  return out.concat(fresh.filter((_, i) => !used.has(i)));
 }
 
 function setsOf(entry, onlyDone) {
