@@ -4,6 +4,7 @@ import * as store from './store.js';
 import { toISO, addDays, weekStart, sessionTotals, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
+import { timerSheet } from './timer.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
@@ -151,7 +152,8 @@ function entryCard(log, entry, i, label) {
   const rows = entry.sets.map((s, j) => `
     <div class="set ${s.done ? 'done' : ''} ${cols}">
       <span class="set-n">${j + 1}</span>
-      <span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s), loaded))}</span>
+      ${measure === 'time' && (s.targetSecs ?? s.secs) ? `<button class="target timer-btn" data-action="timer" data-i="${i}" data-j="${j}" aria-label="Start a ${fmtSecs(s.targetSecs ?? s.secs)} timer for set ${j + 1}"><span class="timer-ico" aria-hidden="true">⏱</span>${esc(targetText(s, measure, su(s), loaded))}</button>`
+        : `<span class="target">${esc(measure === 'none' ? 'Tap when done' : targetText(s, measure, su(s), loaded))}</span>`}
       ${loaded ? `<div class="field wfield"><input type="number" inputmode="decimal" min="0" step="any" value="${store.showW(s.weight, su(s)) ?? ''}" placeholder="${store.showW(s.targetWeight, su(s)) ?? ''}" data-action="setField" data-i="${i}" data-j="${j}" data-k="weight" aria-label="Weight in ${su(s)}, set ${j + 1}"><button class="unit-btn" data-action="setUnit" data-i="${i}" data-j="${j}" aria-label="Weight unit for set ${j + 1}: ${su(s)}. Tap to switch">${su(s)}</button></div>` : ''}
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
@@ -275,6 +277,19 @@ export function session(root, { id, date, warm = false }) {
       markEntry(el.dataset.i);
       persist();
       if (s.done && !log.finished && allDone()) complete(true);
+    },
+    // Timed sets: the target opens a countdown for the assigned seconds.
+    // When time is up the athlete can tick the set from the pop-up.
+    timer: (el) => {
+      const { i, j } = el.dataset, e = log.entries[i], s = e.sets[j];
+      const name = store.get('exercises', e.exerciseId)?.name || 'Timer';
+      timerSheet({
+        secs: s.targetSecs ?? s.secs, title: name, sub: `Set ${Number(j) + 1} of ${e.sets.length}`,
+        onDone: s.done ? null : () => {
+          if (!log.entries[i]?.sets[j] || log.entries[i].sets[j].done) return;
+          root.querySelector(`.check[data-i="${i}"][data-j="${j}"]`)?.click();
+        },
+      });
     },
     setField: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
