@@ -6,7 +6,7 @@ import * as coachViews from './coach.js';
 import { esc, bindActions, toast, ask, styledSelects, demoLinks, closeSheet } from './ui.js';
 import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
 
-store.load({ cloud: cloudEnabled });
+await store.load({ cloud: cloudEnabled });
 
 const routes = [
   [/^\/$/, home],

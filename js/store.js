@@ -1,4 +1,4 @@
-// Data layer. Everything lives in one object saved to localStorage, so the app
+// Data layer. Everything lives in one object kept in localStorage, so the app
 // works offline and in demo mode. When Supabase is configured (js/config.js),
 // sync.js mirrors these same records to the database.
 
@@ -16,23 +16,148 @@ function blank() {
   return { exercises: {}, athletes: {}, blocks: {}, assignments: {}, logs: {}, settings: { units: 'lb', rounding: 5 }, dirty: {} };
 }
 
-function save() {
+// Saved in parts: every kind of record, the logs split by month, and "meta"
+// (settings + upload queue). A change rewrites only the parts it touched, so
+// ticking a set doesn't rewrite the whole team. Parts live in IndexedDB, which
+// has room for years of a team's workouts; localStorage (about 5 MB for the
+// whole site) is the fallback where IndexedDB isn't available.
+const changed = new Set();
+const monthOf = (log) => (log?.date || '').slice(0, 7) || 'none';
+const partOf = (kind, obj) => (kind === 'logs' ? `logs:${monthOf(obj)}` : kind);
+let idb = null;     // IndexedDB connection, when available
+let single = false; // localStorage too full to split an old copy: keep saving it whole
+
+// A part's contents, or null for a month with no workouts left.
+function partData(part) {
+  if (part === 'meta') return { settings: db.settings, dirty: db.dirty };
+  if (!part.startsWith('logs:')) return db[part];
+  const m = part.slice(5), data = {};
+  let any = false;
+  for (const id in db.logs) if (monthOf(db.logs[id]) === m) { data[id] = db.logs[id]; any = true; }
+  return any ? data : null;
+}
+
+function allParts() {
+  const parts = new Set(['meta', ...KINDS.filter((k) => k !== 'logs')]);
+  for (const id in db.logs) parts.add(`logs:${monthOf(db.logs[id])}`);
+  return parts;
+}
+
+function writeChanged() {
+  if (!changed.size) return;
+  const parts = [...changed];
+  try {
+    if (idb) {
+      // put() copies the data right away, so later edits can't leak into this write.
+      const tx = idb.transaction('parts', 'readwrite'), os = tx.objectStore('parts');
+      for (const p of parts) { const d = partData(p); if (d) os.put(d, `${KEY}:${p}`); else os.delete(`${KEY}:${p}`); }
+      tx.onabort = () => { for (const p of parts) changed.add(p); }; // retried with the next save
+    } else if (single) localStorage.setItem(KEY, JSON.stringify(db));
+    else for (const p of parts) { const d = partData(p); if (d) localStorage.setItem(`${KEY}:${p}`, JSON.stringify(d)); else localStorage.removeItem(`${KEY}:${p}`); }
+    changed.clear();
+  } catch { /* private mode or full: keep in memory, retry these parts next save */ }
+}
+
+function save(...parts) {
   logIndex = null;
-  try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { /* private mode: keep in memory */ }
+  for (const p of parts.length ? parts : allParts()) changed.add(p);
+  writeChanged();
   for (const fn of listeners) fn();
+}
+
+const assemble = (entries) => {
+  const d = blank();
+  let found = false;
+  for (const [key, val] of entries) {
+    const part = key.slice(KEY.length + 1);
+    if (part === 'meta') { Object.assign(d, val); found = true; } else if (part.startsWith('logs:')) Object.assign(d.logs, val); else if (KINDS.includes(part)) d[part] = val;
+  }
+  return found ? d : null;
+};
+const lsKeys = () => { const keys = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === KEY || k.startsWith(`${KEY}:`)) keys.push(k); } return keys; };
+const lsParts = () => assemble(lsKeys().filter((k) => k !== KEY).map((k) => [k, JSON.parse(localStorage.getItem(k))]));
+const lsSingle = () => { const d = JSON.parse(localStorage.getItem(KEY) || 'null'); if (d) d.dirty ||= {}; return d; };
+
+function openIdb() {
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') return resolve(null);
+    const done = (v) => { clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => resolve(null), 3000); // a stuck open falls back to localStorage
+    try {
+      const req = indexedDB.open('chunky-training', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('parts');
+      req.onsuccess = () => done(req.result);
+      req.onerror = req.onblocked = () => done(null);
+    } catch { done(null); }
+  });
+}
+
+function idbRead() {
+  return new Promise((resolve, reject) => {
+    const os = idb.transaction('parts').objectStore('parts');
+    const range = IDBKeyRange.bound(`${KEY}:`, `${KEY}:\uffff`);
+    const keys = os.getAllKeys(range), vals = os.getAll(range);
+    vals.onsuccess = () => resolve(assemble(keys.result.map((k, i) => [k, vals.result[i]])));
+    vals.onerror = () => reject(vals.error);
+  });
+}
+
+// Older versions kept everything under one localStorage key. Split it once;
+// the old copy is removed only after every part saved, so nothing is lost if
+// storage is full.
+function moveFromLocalStorage() {
+  let d = null;
+  try { d = lsParts() || lsSingle(); } catch { return null; }
+  if (!d) return null;
+  db = d;
+  const old = lsKeys();
+  if (idb) {
+    const tx = idb.transaction('parts', 'readwrite'), os = tx.objectStore('parts');
+    for (const p of allParts()) { const v = partData(p); if (v) os.put(v, `${KEY}:${p}`); }
+    tx.oncomplete = () => old.forEach((k) => localStorage.removeItem(k));
+    tx.onabort = () => { idb = null; single = old.includes(KEY); }; // stay on localStorage
+  } else if (old.includes(KEY)) {
+    const parts = [...allParts()];
+    try {
+      for (const p of parts) localStorage.setItem(`${KEY}:${p}`, JSON.stringify(partData(p)));
+      localStorage.removeItem(KEY);
+    } catch {
+      for (const p of parts) try { localStorage.removeItem(`${KEY}:${p}`); } catch { /* ignore */ }
+      single = true;
+    }
+  }
+  return d;
 }
 
 // Local mode starts with the exercise library and a sample program, but no
 // athletes. Cloud mode starts empty and fills from Supabase.
+// Runs straight through when there's no IndexedDB (tests), so callers there
+// can skip the await.
 let demo = true;
 export function load({ cloud = false } = {}) {
   demo = !cloud;
   KEY = cloud ? 'wt-cloud-v1' : 'wt-db-v1';
   logIndex = null;
-  try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { db = null; }
-  if (!db) { db = blank(); if (demo) seedDemo(); }
-  db.dirty ||= {};
-  return db;
+  single = false;
+  changed.clear();
+  const finish = (d) => {
+    db = d;
+    if (!db) { db = blank(); if (demo) seedDemo(); for (const p of allParts()) changed.add(p); }
+    db.dirty ||= {};
+    return db;
+  };
+  if (typeof indexedDB === 'undefined') { idb = null; return Promise.resolve(finish(moveFromLocalStorage())); }
+  // index.html starts opening and reading on page load; use that the first time.
+  const early = globalThis.wtDisk;
+  delete globalThis.wtDisk;
+  const timeout = new Promise((r) => setTimeout(() => r(undefined), 3000));
+  return Promise.race([early || Promise.resolve(undefined), timeout]).then(async (got) => {
+    if (got?.entries) { idb = got.conn; return finish(assemble(got.entries.filter(([k]) => String(k).startsWith(`${KEY}:`))) || moveFromLocalStorage()); }
+    idb = got?.conn || await openIdb();
+    let d = null;
+    if (idb) try { d = await idbRead(); } catch { d = null; }
+    return finish(d || moveFromLocalStorage());
+  });
 }
 
 export const isDemo = () => demo;
@@ -48,21 +173,32 @@ export function applyRemote(kind, id, data) {
     // finished on another device beats an unfinished copy here.
     if (!(kind === 'logs' && data?.finished && !db[kind][id]?.finished)) return false;
     delete db.dirty[`${kind}/${id}`];
+    changed.add('meta');
   }
   const cur = db[kind][id];
-  if (!data) { if (!cur) return false; delete db[kind][id]; return true; }
+  if (!data) { if (!cur) return false; delete db[kind][id]; changed.add(partOf(kind, cur)); return true; }
   if (cur && JSON.stringify(cur) === JSON.stringify(data)) return false;
   db[kind][id] = data;
+  changed.add(partOf(kind, data));
+  if (cur) changed.add(partOf(kind, cur));
   return true;
 }
-export function flush() { save(); }
+export function flush() { save('meta'); }
 
-export function clearAll() { db = blank(); save(); }
+// Removes every saved part (and any old localStorage copy) before starting over.
+function wipe() {
+  changed.clear();
+  single = false;
+  try { lsKeys().forEach((k) => localStorage.removeItem(k)); } catch { /* private mode */ }
+  try { if (idb) idb.transaction('parts', 'readwrite').objectStore('parts').delete(IDBKeyRange.bound(`${KEY}:`, `${KEY}:\uffff`)); } catch { /* ignore */ }
+}
+
+export function clearAll() { wipe(); db = blank(); save(); }
 
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
 export const settings = () => db.settings;
-export function setSetting(k, v) { db.settings[k] = v; save(); }
+export function setSetting(k, v) { db.settings[k] = v; save('meta'); }
 
 // Weight helpers for this device's unit. Stored weights are always pounds.
 export const unit = () => db.settings.units || 'lb';
@@ -83,21 +219,25 @@ const mark = () => `${Date.now()}.${seq++}`;
 
 export function put(kind, obj) {
   obj.updatedAt = new Date().toISOString();
+  const prev = db[kind][obj.id];
   db[kind][obj.id] = obj;
   db.dirty[`${kind}/${obj.id}`] = { n: mark() };
-  save();
+  save('meta', partOf(kind, obj), ...(prev ? [partOf(kind, prev)] : []));
   return obj;
 }
 
 // Many records in one go (e.g. adding a whole exercise library): saves once.
 export function putMany(kind, objs) {
   const at = new Date().toISOString();
+  const parts = new Set(['meta']);
   for (const obj of objs) {
     obj.updatedAt = at;
+    if (db[kind][obj.id]) parts.add(partOf(kind, db[kind][obj.id]));
     db[kind][obj.id] = obj;
     db.dirty[`${kind}/${obj.id}`] = { n: mark() };
+    parts.add(partOf(kind, obj));
   }
-  if (objs.length) save();
+  if (objs.length) save(...parts);
   return objs;
 }
 
@@ -107,7 +247,7 @@ export function del(kind, id) {
   const data = db[kind][id];
   delete db[kind][id];
   db.dirty[`${kind}/${id}`] = { n: mark(), deleted: true, ...(data ? { data } : {}) };
-  save();
+  save('meta', partOf(kind, data));
 }
 
 // [[key, mark]]; mark is { n, deleted?, data? } (true / 'deleted' from older versions).
@@ -116,14 +256,14 @@ export const isDeleted = (mark) => mark === 'deleted' || Boolean(mark?.deleted);
 // Clear only marks that haven't changed since they were read: [[key, mark]].
 export function clearDirty(entries) {
   for (const [k, m] of entries) if (db.dirty[k] === m) delete db.dirty[k];
-  save();
+  save('meta');
 }
 
 export function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function reset() { db = blank(); if (demo) seedDemo(); save(); }
+export function reset() { wipe(); db = blank(); if (demo) seedDemo(); save(); }
 
 // ---- queries ----
 
