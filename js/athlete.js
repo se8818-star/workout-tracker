@@ -1,9 +1,9 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, untouchedLog, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, progTag, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
@@ -26,11 +26,16 @@ function dateStrip(athleteId, iso) {
   html += `<button class="icon-btn" data-action="goDate" data-date="${addDays(mon, -7)}" aria-label="Previous week">‹</button>`;
   for (let i = 0; i < 7; i++) {
     const d = addDays(mon, i);
-    const planned = store.plannedOn(athleteId, d).length > 0 || !!store.warmupOn(athleteId, d);
-    const log = store.logFor(athleteId, d);
-    const cls = [d === iso && 'on', d === today() && 'today', planned && 'planned', log?.finished && 'done'].filter(Boolean).join(' ');
+    const plan = store.plannedOn(athleteId, d)[0];
+    const planned = !!plan || !!store.warmupOn(athleteId, d);
+    const logs = store.logsOn(athleteId, d);
+    const log = logs.find((l) => l.finished) || logs[0];
+    // The dot takes the color of the day's program (the one logged, if any).
+    const prog = store.logProgram(log);
+    const color = prog ? prog.color : plan ? store.programColor(plan.assignment) : null;
+    const cls = [d === iso && 'on', d === today() && 'today', planned && 'planned', logs.length && logs.every((l) => l.finished) && 'done', color != null && `pc${color}`].filter(Boolean).join(' ');
     html += `<button class="day ${cls}" data-action="goDate" data-date="${d}">
-      <span>${fmtDate(d, { weekday: 'narrow' })}</span><b>${Number(d.slice(8))}</b><i></i></button>`;
+      <span>${fmtDate(d, { weekday: 'narrow' })}</span><b>${Number(d.slice(8))}</b><i${color != null ? ' class="pdot"' : ''}></i></button>`;
   }
   html += `<button class="icon-btn" data-action="goDate" data-date="${addDays(mon, 7)}" aria-label="Next week">›</button></nav>`;
   return html;
@@ -95,14 +100,21 @@ export function entrySummary(entry, ex = store.get('exercises', entry.exerciseId
   return amount ? `${n} × ${amount}${word}${load}` : `${n} set${n === 1 ? '' : 's'}${load}`;
 }
 
-function workoutCard(id, iso, title, sub, entries, log, pill = '') {
+// A workout's page: "#/athlete/a/session/2026-11-14", "?c=throwing" for
+// categories other than Strength, the warmup page for a warmup log.
+export function sessionHref(log, cat = log.category) {
+  if (log.warmup) return `#/athlete/${log.athleteId}/warmup/${log.date}`;
+  return `#/athlete/${log.athleteId}/session/${log.date}${cat && cat !== 'strength' ? `?c=${cat}` : ''}`;
+}
+
+function workoutCard(id, iso, title, sub, entries, log, pill = '', cat = 'strength') {
   const st = statusOf(log);
   const ex = store.exercisesById();
   const shown = entries.slice(0, 4);
   const more = entries.length - shown.length;
   const go = { done: 'View workout', live: 'Continue workout' }[st.cls] || 'Start workout';
-  return `<a class="workout-card ${st.cls}" href="#/athlete/${id}/session/${iso}">
-    <div class="wc-top"><span class="kicker">${esc(sub)}</span>${st.cls ? `<span class="status ${st.cls}">${st.txt}</span>` : pill}</div>
+  return `<a class="workout-card ${st.cls}" href="${sessionHref({ athleteId: id, date: iso }, cat)}">
+    <div class="wc-top">${sub}${st.cls ? `<span class="status ${st.cls}">${st.txt}</span>` : pill}</div>
     <h2>${esc(title)}</h2>
     <ul class="wc-list">${shown.map((e) => `<li><span>${esc(ex[e.exerciseId]?.name || e.exerciseId)}</span><span>${esc(entrySummary(e, ex[e.exerciseId]))}</span></li>`).join('')}
       ${more > 0 ? `<li class="more"><span>+ ${more} more</span><span></span></li>` : ''}</ul>
@@ -117,42 +129,60 @@ function warmRow(id, iso, name, count, log) {
     <span class="status ${st.cls || 'warm'}">${st.cls ? st.txt : 'Do first'}</span><span class="chev"></span></a>`;
 }
 
-// The day's warmup row and workout card (or rest-day note), as the athlete
+// The day's warmup row and workout cards (or rest-day note), as the athlete
 // sees them on Today. `peek` is the coach's hover preview: just the cards,
-// nothing to press. Reading never saves anything (see store.keepLog).
+// nothing to press. Reading never saves anything (see store.keepLog), and the
+// buttons that would save a workout for the athlete are left out for a coach.
+// Returns { html, others } (others: the "Also today" plans, for doOther).
 export function dayCards(id, iso, { peek = false } = {}) {
-  const plans = store.plannedOn(id, iso);
-  const log = store.currentLog(id, iso);
-  // The assigned warmup gets its own row, above the workout.
+  const look = peek || isCoach();
+  // The assigned warmup gets its own row, above the workouts.
   const wlog = store.currentWarmupLog(id, iso), w = store.warmupOn(id, iso);
   const warm = wlog ? warmRow(id, iso, wlog.name, wlog.entries.length, wlog)
     : w ? warmRow(id, iso, w.block.name, w.block.days[0].items.length, null) : '';
 
-  let body;
-  if (log) {
-    const block = store.get('blocks', log.blockId);
-    body = workoutCard(id, iso, log.name, block ? `${block.name} · Week ${log.week + 1}` : 'Workout', log.entries, log);
-  } else if (plans.length) {
-    const p = plans[0];
-    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}`, store.previewEntries(id, iso, p), null,
-      p.block.deloadWeek === p.week ? '<span class="status">Deload</span>' : '');
-  } else {
+  // One workout card per category (Strength, Throwing, Speed, Rehab), each
+  // logged on its own. Within a category, two programs can land on the same
+  // day: the newest is the one shown, the others can be done instead while
+  // nothing is logged yet.
+  const others = [];
+  const cards = store.CATEGORIES.map(({ k: cat }) => {
+    const plans = store.plannedIn(id, iso, cat);
+    const log = store.currentLog(id, iso, cat);
+    if (!log && !plans.length) return '';
+    let card;
+    if (log) {
+      const prog = store.logProgram(log);
+      card = workoutCard(id, iso, log.name, prog ? progTag(prog.name, prog.color, log.week) : '<span class="kicker">Workout</span>', log.entries, log, '', cat);
+    } else {
+      const p = plans[0];
+      card = workoutCard(id, iso, p.block.days[p.dayIndex].name, progTag(p.block.name, store.programColor(p.assignment), p.week), store.previewEntries(id, iso, p), null,
+        p.block.deloadWeek === p.week ? '<span class="status">Deload</span>' : '', cat);
+    }
+    const shownId = log ? log.assignmentId : plans[0]?.assignment.id;
+    const alt = (!log || untouchedLog(log)) ? plans.filter((p) => p.assignment.id !== shownId) : [];
+    return card + alt.map((p) => { others.push(p); return `<div class="also-today"><span class="grow"><span class="muted small">Also today</span><br>
+      ${progTag(p.block.name, store.programColor(p.assignment), p.week)} <b>${esc(p.block.days[p.dayIndex].name)}</b></span>
+      ${look ? '' : `<button class="chip" data-action="doOther" data-k="${others.length - 1}">Do this one instead</button>`}</div>`; }).join('');
+  }).join('');
+  let body = cards;
+  if (!cards) {
     let next = null;
     for (let k = 1; k <= 14 && !next; k++) { const d = addDays(iso, k); const pl = store.plannedOn(id, d)[0]; if (pl) next = { d, name: pl.block.days[pl.dayIndex].name }; }
-    // "Do a workout anyway" saves a workout for the athlete, so a coach doesn't get it.
     body = `<div class="empty"><b>Rest day</b><p>${next ? `Next up: ${esc(next.name)}, ${fmtDate(next.d, { weekday: 'long', month: 'short', day: 'numeric' })}.` : 'Nothing is scheduled.'}</p>
-      ${peek || isCoach() ? '' : '<button class="btn ghost" data-action="switch">Do a workout anyway</button>'}</div>`;
+      ${look ? '' : '<button class="btn ghost" data-action="switch">Do a workout anyway</button>'}</div>`;
   }
-  return warm + body;
+  return { html: warm + body, others };
 }
 
-// Today: the day's warmup and workout, with a preview of what's in it.
+// Today: the day's warmup and workouts, with a preview of what's in them.
 // A coach gets the same page for any athlete and day, marked as a preview.
 export function today_(root, { id }, query) {
   store.fillMaxes(id);
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
   const iso = query.get('d') || today();
+  const { html, others } = dayCards(id, iso);
   const last = store.logsFor(id).filter((l) => !l.warmup && l.date < iso && loggedWork(l)).pop();
 
   root.innerHTML = `
@@ -160,17 +190,23 @@ export function today_(root, { id }, query) {
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
     ${isCoach() ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
     ${dateStrip(id, iso)}
-    ${dayCards(id, iso)}
-    ${last ? `<p class="last-line"><span>Last session</span><a href="#/athlete/${id}/session/${last.date}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
+    ${html}
+    ${last ? `<p class="last-line"><span>Last session</span><a href="${sessionHref(last)}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
 
   bindActions(root, {
     goDate: (el) => { location.hash = `#/athlete/${id}?d=${el.dataset.date}`; },
-    switch: () => switchSheet(id, iso, (plan) => {
+    doOther: (el) => {
+      const l = store.startLog(id, iso, others[Number(el.dataset.k)]);
+      l.chosen = true; // stays even with nothing logged, instead of going back to the newest program
+      store.saveLog(l);
+      location.hash = sessionHref(l);
+    },
+    switch: () => switchSheet(id, iso, null, (plan) => {
       const l = store.startLog(id, iso, plan);
       l.chosen = true; // picked by the athlete, so it stays even with nothing logged
       store.saveLog(l);
       closeSheet();
-      location.hash = `#/athlete/${id}/session/${iso}`;
+      location.hash = sessionHref(l);
     }),
   });
 }
@@ -240,7 +276,7 @@ function rpeButtons(val) {
 }
 
 // The assigned warmup: the same page, logged separately from the workout.
-export function warmupSession(root, params) { session(root, { ...params, warm: true }); }
+export function warmupSession(root, params, query) { session(root, { ...params, warm: true }, query); }
 
 // The workout page: every exercise in order with boxes for weight and reps.
 // Effort / minutes / note in one line, e.g. "Effort 7/10 · 45 min · “felt good”".
@@ -260,11 +296,12 @@ function finishedCard(log, warm) {
     </div>`;
 }
 
-export function session(root, { id, date, warm = false }) {
+export function session(root, { id, date, warm = false }, query = new URLSearchParams()) {
   const athlete = store.get('athletes', id);
   if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
-  const plans = warm ? [] : store.plannedOn(id, date);
-  let log = warm ? store.currentWarmupLog(id, date) : store.currentLog(id, date);
+  const cat = store.CATEGORIES.some((c) => c.k === query.get('c')) ? query.get('c') : 'strength';
+  const plans = warm ? [] : store.plannedIn(id, date, cat);
+  let log = warm ? store.currentWarmupLog(id, date) : store.currentLog(id, date, cat);
   if (!log) {
     const w = warm && store.warmupOn(id, date);
     if (!w && !plans.length) { location.hash = `#/athlete/${id}?d=${date}`; return; }
@@ -283,7 +320,7 @@ export function session(root, { id, date, warm = false }) {
       <div class="sb-row"><span class="sb-title">${esc(warm ? 'Warmup' : log.name)}</span><span class="sb-count" id="sb-count"><b>${nDone}</b> of ${nAll} sets</span></div>
       <div class="progress"><i id="sb-bar" style="width:${nAll ? (nDone / nAll) * 100 : 0}%"></i></div>
     </div>
-    <p class="kicker">${esc(warm ? 'Before your workout' : block ? `${block.name} · Week ${log.week + 1}` : '')}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
+    <p class="kicker">${warm ? 'Before your workout' : block ? (() => { const pg = store.logProgram(log); return progTag(pg.name, pg.color, log.week); })() : ''}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
     ${!warm && isCoach() && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
     <div style="height:10px"></div>
     ${warm ? log.entries.map((e, i) => entryCard(log, e, i, labels[i], folds[i])).join('') : log.entries.map((e, i) => {
@@ -297,7 +334,7 @@ export function session(root, { id, date, warm = false }) {
       : `${log.note || log.sessionRpe ? `<p class="muted small" style="margin-top:14px">${sessionSummary(log)}</p>` : ''}
     <div class="finish-bar"><button class="btn dark" data-action="openFinish">Finish ${warm ? 'warmup' : 'workout'}</button></div>`}`;
 
-  const rerender = () => { const y = window.scrollY; session(root, { id, date, warm }); window.scrollTo(0, y); };
+  const rerender = () => { const y = window.scrollY; session(root, { id, date, warm }, query); window.scrollTo(0, y); };
   const persist = () => store.saveLog(log);
   const unitOf = (i, j) => log.entries[i].sets[j].unit || log.entries[i].unit || store.unit();
   const markEntry = (i) => root.querySelector(`#entry-${i}`)?.classList.toggle('complete', log.entries[i].sets.every((s) => s.done));
@@ -500,7 +537,7 @@ export function session(root, { id, date, warm = false }) {
       log.entries.push({ exerciseId: exId, ...(x?.measure ? { measure: x.measure } : {}), unit: store.unit(), note: '', sets: [{ targetReps: null, targetSecs: null, targetWeight: null, reps: null, secs: null, weight: null, done: false }], addedByAthlete: true });
       persist(); rerender();
     }),
-    switch: () => switchSheet(id, date, async (plan) => {
+    switch: () => switchSheet(id, date, cat, async (plan) => {
       if (log.entries.some((e) => e.sets.some((s) => s.done)) && !await ask('The sets you already logged today are replaced.', { title: 'Switch workout?', ok: 'Switch', danger: true })) return;
       store.del('logs', log.id);
       log = store.startLog(id, date, plan);
@@ -689,12 +726,15 @@ export function pickExerciseSheet(onPick, { allowNew = false } = {}) {
   });
 }
 
-function switchSheet(athleteId, iso, onPick) {
-  const groups = store.assignmentsFor(athleteId).map((a) => ({ a, block: store.get('blocks', a.blockId) })).filter((g) => g.block && g.block.kind !== 'warmup');
+// `cat`: only programs in that category (switching the day's Throwing
+// workout offers Throwing days); null for any program.
+function switchSheet(athleteId, iso, cat, onPick) {
+  const groups = store.assignmentsFor(athleteId).map((a) => ({ a, block: store.get('blocks', a.blockId) }))
+    .filter((g) => g.block && g.block.kind !== 'warmup' && (!cat || store.categoryOf(g.block) === cat));
   if (!groups.length) { toast('No program assigned yet. Ask your coach.'); return; }
   const html = groups.map(({ a, block }) => {
     const curWeek = Math.max(0, Math.min(block.weeks - 1, Math.floor((new Date(iso) - new Date(a.startDate)) / (7 * 86400000))));
-    let h = `<h3>${esc(block.name)}</h3><p class="muted">Pick any day. Week ${curWeek + 1} is this week.</p>`;
+    let h = `<h3>${progTag(block.name, store.programColor(a))}</h3><p class="muted">Pick any day. Week ${curWeek + 1} is this week.</p>`;
     for (let w = 0; w < block.weeks; w++) {
       h += `<details ${w === curWeek ? 'open' : ''}><summary>Week ${w + 1}${block.deloadWeek === w ? ' (deload)' : ''}</summary><ul class="pick">`;
       block.days.forEach((d, di) => {
@@ -725,7 +765,9 @@ export function week(root, { id }, query) {
   const w = store.showW;
   const t = cur.done;
   const patterns = Object.keys(PATTERN_LABEL).filter((p) => (t.setsByPattern[p] || cur.planned.setsByPattern[p]));
-  const sessions = cur.days.filter((d) => d.log);
+  // Every workout of the week, one row each (a day can hold Strength and Throwing).
+  const exAll = store.exercisesById();
+  const sessions = cur.days.flatMap((d) => d.logs.map((log) => ({ iso: d.iso, log, totals: sessionTotals(log, exAll, true) })));
 
   // Mid-week, compare with the same days of last week, not the whole of it.
   const isNow = mon === weekStart(today());
@@ -774,7 +816,7 @@ export function week(root, { id }, query) {
       ${patterns.length ? bars(patterns.map((p) => ({ label: PATTERN_LABEL[p], value: t.setsByPattern[p] || 0, sub: `of ${cur.planned.setsByPattern[p] || 0}` }))) : '<p class="muted">Nothing logged yet this week.</p>'}
     </section>
     <h3 class="list-head" style="margin-top:20px">Workouts this week</h3>
-    ${sessions.length ? `<div class="list">${sessions.map((d) => `<a href="#/athlete/${id}/session/${d.iso}"><span class="grow"><span class="name">${esc(d.log.name)}</span><br><span class="sub">${fmtDate(d.iso)} · ${fmt(d.totals.sets)} sets${d.log.sessionRpe ? ` · effort ${d.log.sessionRpe}` : ''}</span></span><span class="right"><b>${fmt(w(d.totals.tonnage))}</b> ${u}</span><span class="chev"></span></a>`).join('')}</div>`
+    ${sessions.length ? `<div class="list">${sessions.map((d) => `<a href="${sessionHref(d.log)}"><span class="grow"><span class="name">${esc(d.log.name)}</span><br><span class="sub">${fmtDate(d.iso)} · ${fmt(d.totals.sets)} sets${d.log.sessionRpe ? ` · effort ${d.log.sessionRpe}` : ''}</span></span><span class="right"><b>${fmt(w(d.totals.tonnage))}</b> ${u}</span><span class="chev"></span></a>`).join('')}</div>`
       : '<p class="muted" style="margin:0 4px 14px">No workouts logged this week yet.</p>'}
     <section class="card"><h3>Planned vs done</h3>
       <ul class="kv">
@@ -795,12 +837,14 @@ export function week(root, { id }, query) {
 
 // Planned volume for one day (the dashed bars on Progress).
 function planTonnage(athleteId, iso) {
-  const p = store.plannedOn(athleteId, iso)[0];
-  if (!p) return 0;
   const ex = store.exercisesById();
   const a = store.get('athletes', athleteId);
-  const s = buildSession(p.block, p.dayIndex, p.week, a, store.roundStep());
-  return s ? sessionTotals(s, ex, false).tonnage : 0;
+  // The newest program in each category that day.
+  return store.CATEGORIES.reduce((sum, c) => {
+    const p = store.plannedIn(athleteId, iso, c.k)[0];
+    const s = p && buildSession(p.block, p.dayIndex, p.week, a, store.roundStep());
+    return sum + (s ? sessionTotals(s, ex, false).tonnage : 0);
+  }, 0);
 }
 
 // Where a max came from: "est. from 185 × 5, Nov 3" or "typed in".
@@ -852,8 +896,8 @@ export function history(root, { id }) {
         <div class="list">${ls.map((l) => {
           const t = sessionTotals(l, ex, true);
           const notes = [l.note, ...l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`)].filter(Boolean);
-          return `<a href="#/athlete/${id}/session/${l.date}"><span class="grow"><span class="name">${esc(l.name)}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><br>
-            <span class="sub">${fmtDate(l.date)}${l.sessionRpe ? ` · effort ${l.sessionRpe}` : ''}${l.minutes ? ` · ${l.minutes} min` : ''}</span>
+          return `<a href="${sessionHref(l)}"><span class="grow"><span class="name">${esc(l.name)}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><br>
+            <span class="sub">${(() => { const pg = store.logProgram(l); return pg ? `${progTag(pg.name, pg.color)} ` : ''; })()}${fmtDate(l.date)}${l.sessionRpe ? ` · effort ${l.sessionRpe}` : ''}${l.minutes ? ` · ${l.minutes} min` : ''}</span>
             ${notes.length ? `<br><span class="sub note">“${esc(notes.join(' · '))}”</span>` : ''}</span>
             <span class="right"><b>${fmt(store.showW(t.tonnage))}</b> ${u}${t.contacts ? `<br>${fmt(t.contacts)} contacts` : ''}</span><span class="chev"></span></a>`;
         }).join('')}</div>`).join('');

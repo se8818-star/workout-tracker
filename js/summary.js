@@ -12,24 +12,28 @@ export function weekSummary(athleteId, monday) {
   const days = [];
   for (let i = 0; i < 7; i++) {
     const iso = addDays(monday, i);
-    // The athlete is shown one program a day (the newest when two overlap),
-    // so only that one counts as planned.
-    const plans = store.plannedOn(athleteId, iso).slice(0, 1);
+    // One workout a day per category (the newest program when two in the
+    // same category overlap), so each category counts as its own session.
+    const seen = new Set();
+    const plans = store.plannedOn(athleteId, iso).filter((p) => { const c = store.categoryOf(p.block); if (seen.has(c)) return false; seen.add(c); return true; });
     for (const p of plans) {
       const s = buildSession(p.block, p.dayIndex, p.week, athlete, store.roundStep());
       s.items = s.items.map((it) => tagPctOfMax(it, athlete, ex));
       planned = addTotals(planned, sessionTotals(s, ex, false));
       sessionsPlanned++;
     }
-    const log = store.logFor(athleteId, iso);
+    const logs = store.logsOn(athleteId, iso);
     let dayTotals = emptyTotals();
-    if (log) {
-      dayTotals = sessionTotals(log, ex, true);
-      done = addTotals(done, dayTotals);
+    for (const log of logs) {
+      const t = sessionTotals(log, ex, true);
+      dayTotals = addTotals(dayTotals, t);
+      done = addTotals(done, t);
       // Ticked sets count as a session done even if Finish wasn't tapped.
       if (loggedWork(log)) { sessionsDone++; load += sessionLoad(log); }
     }
-    days.push({ iso, planned: plans.length > 0, log, totals: dayTotals });
+    // `log`: the day's first workout with work in it (or the first opened), for pages that show one.
+    const log = logs.find(loggedWork) || logs[0] || null;
+    days.push({ iso, planned: plans.length > 0, plannedCount: plans.length, log, logs, totals: dayTotals });
   }
   return { planned, done, sessionsPlanned, sessionsDone, load, days };
 }
