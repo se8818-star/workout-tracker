@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
@@ -313,6 +313,28 @@ export function session(root, { id, date, warm = false }) {
       : prs.length ? `${done}. New max: ${prs.join(', ')}` : done);
     if (auto) rerender(); else location.hash = `#/athlete/${id}?d=${date}`;
   };
+  // An exercise was just finished: fold it, open the next unfinished one
+  // (the rest of a superset first) and bring it into view. A header tapped
+  // shut earlier doesn't keep the next exercise closed.
+  const openNext = (i) => {
+    const o = foldOverrides(log), k = nextOpenEntry(log.entries, i);
+    delete o[i];
+    if (k == null) { setTimeout(rerender, 250); return; }
+    foldFocus.set(log.id, k);
+    const g = log.entries[k].group;
+    log.entries.forEach((e, n) => { if (n === k || (g && e.group === g && !e.warmup === !log.entries[k].warmup)) delete o[n]; });
+    setTimeout(() => {
+      rerender();
+      const card = root.querySelector(`#entry-${k}`);
+      if (!card) return;
+      const r = card.getBoundingClientRect(), bar = root.querySelector('.session-bar')?.getBoundingClientRect().bottom || 0;
+      // Only scroll when the top of the next exercise isn't comfortably on screen.
+      if (r.top < bar + 8 || r.top > window.innerHeight * 0.6) {
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        window.scrollTo({ top: window.scrollY + r.top - bar - 10, behavior: smooth ? 'smooth' : 'auto' });
+      }
+    }, 250);
+  };
   const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
 
   bindActions(root, {
@@ -337,7 +359,7 @@ export function session(root, { id, date, warm = false }) {
       root.querySelector('#sb-bar').style.width = `${n ? (d / n) * 100 : 0}%`;
       if (s.done && !log.finished && allDone()) { complete(true); return; }
       // An exercise just finished: fold it and open the next one.
-      if (s.done && log.entries[el.dataset.i].sets.every((x) => x.done)) { delete foldOverrides(log)[el.dataset.i]; setTimeout(rerender, 250); return; }
+      if (s.done && log.entries[el.dataset.i].sets.every((x) => x.done)) { openNext(Number(el.dataset.i)); return; }
       // Move the "next set" outline along.
       const card = root.querySelector(`#entry-${el.dataset.i}`);
       if (card?.classList.contains('current')) {
@@ -482,12 +504,16 @@ export function session(root, { id, date, warm = false }) {
 // Which exercises are open on the workout page. By default the first
 // unfinished exercise (and the rest of its superset) is open and everything
 // else is folded to one line; a tap on a header overrides that for the visit.
+// Finishing an exercise moves the open one along (foldFocus), even past an
+// exercise the athlete skipped.
 const foldTaps = new Map();
+const foldFocus = new Map();
 const foldOverrides = (log) => { if (!foldTaps.has(log.id)) foldTaps.set(log.id, {}); return foldTaps.get(log.id); };
 function foldState(log) {
   const o = foldOverrides(log);
   const isDone = (e) => e.sets.length > 0 && e.sets.every((x) => x.done);
-  const first = log.entries.findIndex((e) => !isDone(e));
+  const f = foldFocus.get(log.id);
+  const first = f != null && log.entries[f] && !isDone(log.entries[f]) ? f : log.entries.findIndex((e) => !isDone(e));
   const grp = first >= 0 ? log.entries[first].group : null;
   return log.entries.map((e, i) => {
     const auto = i === first || (grp && e.group === grp && !isDone(e) && e.warmup === log.entries[first].warmup);
