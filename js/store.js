@@ -287,11 +287,17 @@ export function activeProgram(athleteId, iso) {
 
 // What is planned for an athlete on a date: [{assignment, block, week, dayIndex}]
 // Programs only; an assigned warmup is its own session (warmupOn).
+// A newer assignment of the same program (or the athlete's copy of it)
+// replaces an older one that was never ended, so the old weekdays can't show
+// up as extra training days. Different programs each keep their own days.
 export function plannedOn(athleteId, iso) {
-  const out = [];
+  const out = [], seen = new Set();
   for (const a of assignmentsFor(athleteId)) {
     const block = get('blocks', a.blockId);
-    if (!block || block.kind === 'warmup') continue;
+    if (!block || block.kind === 'warmup' || assignmentStatus(a, block, iso) !== 'current') continue;
+    const root = block.copiedFrom || block.id;
+    if (seen.has(root)) continue;
+    seen.add(root);
     const at = scheduledOn(a, block, iso);
     if (at) out.push({ assignment: a, block, ...at });
   }

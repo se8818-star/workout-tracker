@@ -78,6 +78,28 @@ test('the program started last is the active one, and overlapping days follow it
   assert.equal(store.activeProgram('a', '2027-01-04'), null);
 });
 
+test("an older copy of the same program adds no days once a newer one runs", () => {
+  store.clearAll();
+  store.put('blocks', { ...blockOf('p', 'Prog'), weeks: 10, days: ['1', '2', '3', '4'].map((n) => ({ name: `Day ${n}`, items: [] })) });
+  // Old schedule Tue/Thu/Sat/Sun, left running; new one Tue/Wed/Sat/Sun.
+  store.put('assignments', { id: 'g-old', athleteId: 'a', blockId: 'p', startDate: '2026-10-19', weekdays: [1, 3, 5, 6] });
+  store.put('assignments', { id: 'g-new', athleteId: 'a', blockId: 'p', startDate: '2026-10-26', weekdays: [1, 2, 5, 6] });
+  assert.deepEqual(store.plannedOn('a', '2026-11-12'), []); // Thursday: rest day now
+  assert.equal(store.plannedOn('a', '2026-11-11')[0].assignment.id, 'g-new'); // Wednesday
+  assert.equal(store.plannedOn('a', '2026-11-10').length, 1); // Tuesday, once
+  assert.equal(store.plannedOn('a', '2026-10-22')[0].assignment.id, 'g-old'); // before the new one started
+});
+
+test('a different program keeps its own days alongside another', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('lift', 'Lift'));
+  store.put('blocks', blockOf('run', 'Run'));
+  store.put('assignments', { id: 'g-lift', athleteId: 'a', blockId: 'lift', startDate: '2026-11-09', weekdays: [0] });
+  store.put('assignments', { id: 'g-run', athleteId: 'a', blockId: 'run', startDate: '2026-11-10', weekdays: [2] });
+  assert.equal(store.plannedOn('a', '2026-11-16')[0].block.id, 'lift'); // Monday
+  assert.equal(store.plannedOn('a', '2026-11-18')[0].block.id, 'run'); // Wednesday
+});
+
 test('an empty switched-to day goes away once its program is removed', () => {
   store.clearAll();
   store.put('blocks', blockOf('p', 'Prog'));
