@@ -90,22 +90,39 @@ test('an empty switched-to day goes away once its program is removed', () => {
   assert.equal(store.currentLog('a', '2026-11-09'), null);
 });
 
-test('each program an athlete is on gets its own color, and a coach can pick one', () => {
+test('colors follow the category; a second program in a category gets its second color; a coach can pick', () => {
   store.clearAll();
   store.put('blocks', blockOf('p1', 'Lift'));
-  store.put('blocks', blockOf('p2', 'Run'));
-  store.put('blocks', { ...blockOf('w', 'Warm'), kind: 'warmup' });
+  store.put('blocks', blockOf('p3', 'Lift 2'));
+  store.put('blocks', { ...blockOf('p2', 'Throw'), category: 'throwing' });
   store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'p1', startDate: '2026-11-02', weekdays: [0] });
-  store.put('assignments', { id: 'gw', athleteId: 'a', blockId: 'w', startDate: '2026-11-02', weekdays: [0] });
-  // Older assignments have no color saved: they're numbered in start order.
-  assert.equal(store.programColor(store.get('assignments', 'g1')), 0);
-  const c = store.freeColor('a', '2026-11-09');
-  assert.equal(c, 1);
-  store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p2', startDate: '2026-11-09', weekdays: [1], color: c });
-  assert.equal(store.programColor(store.get('assignments', 'g2')), 1);
+  store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p2', startDate: '2026-11-02', weekdays: [1] });
+  store.put('assignments', { id: 'g3', athleteId: 'a', blockId: 'p3', startDate: '2026-11-09', weekdays: [0] });
+  const col = (id) => store.programColor(store.get('assignments', id));
+  assert.equal(col('g1'), 0); // Strength, first
+  assert.equal(col('g2'), 2); // Throwing
+  assert.equal(col('g3'), 5); // Strength, second
   store.put('assignments', { ...store.get('assignments', 'g1'), color: 4 });
-  assert.equal(store.programColor(store.get('assignments', 'g1')), 4);
-  assert.equal(store.freeColor('a', '2026-11-09'), 0);
+  assert.equal(col('g1'), 4);
+});
+
+test('each category is its own workout on the day, logged on its own', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('lift', 'Lift'));
+  store.put('blocks', { ...blockOf('thr', 'Throw'), category: 'throwing' });
+  store.put('assignments', { id: 'gl', athleteId: 'a', blockId: 'lift', startDate: '2026-11-09', weekdays: [0] });
+  store.put('assignments', { id: 'gt', athleteId: 'a', blockId: 'thr', startDate: '2026-11-09', weekdays: [0] });
+  const iso = '2026-11-09';
+  assert.equal(store.plannedIn('a', iso, 'strength')[0].block.id, 'lift');
+  assert.equal(store.plannedIn('a', iso, 'throwing')[0].block.id, 'thr');
+  const l1 = store.startLog('a', iso, store.plannedIn('a', iso, 'strength')[0]);
+  const l2 = store.startLog('a', iso, store.plannedIn('a', iso, 'throwing')[0]);
+  assert.equal(l1.id, 'a:2026-11-09'); // strength keeps the old id
+  assert.equal(l2.id, 'a:2026-11-09:throwing');
+  assert.equal(l2.category, 'throwing');
+  assert.equal(store.currentLog('a', iso, 'throwing').blockId, 'thr');
+  assert.equal(store.currentLog('a', iso).blockId, 'lift');
+  assert.deepEqual(store.logsOn('a', iso).map((l) => l.id), ['a:2026-11-09', 'a:2026-11-09:throwing']);
 });
 
 test('two programs at once each keep their own days, and the coach sees each one done', () => {
@@ -121,7 +138,7 @@ test('two programs at once each keep their own days, and the coach sees each one
   done('2026-11-02'); done('2026-11-09'); done('2026-11-03');
   assert.deepEqual(store.programProgress(g1, '2026-11-11'), { done: 2, due: 2, total: 4, last: '2026-11-09' });
   assert.deepEqual(store.programProgress(g2, '2026-11-11'), { done: 1, due: 2, total: 4, last: '2026-11-03' });
-  assert.deepEqual(store.logProgram(store.logFor('a', '2026-11-03')), { name: 'Run', color: 1, assignmentId: 'g2' });
+  assert.deepEqual(store.logProgram(store.logFor('a', '2026-11-03')), { name: 'Run', color: 1, assignmentId: 'g2', category: 'strength' });
   // A removed program's old workouts still say which program they were.
   store.del('assignments', 'g2');
   assert.equal(store.logProgram(store.logFor('a', '2026-11-03')).name, 'Run');

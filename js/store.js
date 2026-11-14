@@ -298,41 +298,46 @@ export function plannedOn(athleteId, iso) {
   return out;
 }
 
-// ---- program tags: a color per assigned program, so an athlete on more than
-// one can tell them apart. Colors are numbered 0..PROGRAM_COLORS-1 (styles.css
-// .pc0...). A coach can pick one; otherwise each new program gets the first
-// color the athlete's other programs aren't using.
+// ---- categories: every program is Strength, Throwing, Speed or Rehab
+// (block.category; none = Strength). Each category is its own workout on the
+// athlete's day, logged on its own, like the warmup. Colors are fixed per
+// category so they mean the same thing for every athlete; a second program in
+// the same category gets the category's second color. Colors are numbered
+// 0..PROGRAM_COLORS-1 (styles.css .pc0...); a coach can pick one per assignment.
 export const PROGRAM_COLORS = 6;
+export const CATEGORIES = [
+  { k: 'strength', label: 'Strength', colors: [0, 5] },
+  { k: 'throwing', label: 'Throwing', colors: [2, 4] },
+  { k: 'speed', label: 'Speed', colors: [3, 4] },
+  { k: 'rehab', label: 'Rehab', colors: [1, 5] },
+];
+const CAT = Object.fromEntries(CATEGORIES.map((c) => [c.k, c]));
+export const categoryOf = (block) => (block && CAT[block.category] ? block.category : 'strength');
+export const categoryLabel = (k) => CAT[k]?.label || 'Strength';
+
+// What's planned in one category on a date (see plannedOn), newest program first.
+export function plannedIn(athleteId, iso, cat = 'strength') {
+  return plannedOn(athleteId, iso).filter((p) => categoryOf(p.block) === cat);
+}
+
 export function programColor(assignment) {
   if (!assignment) return 0;
   if (Number.isInteger(assignment.color)) return assignment.color % PROGRAM_COLORS;
-  const mine = all('assignments').filter((g) => g.athleteId === assignment.athleteId && get('blocks', g.blockId)?.kind !== 'warmup')
+  const cat = categoryOf(get('blocks', assignment.blockId));
+  // Same-category programs for this athlete, in start order: 1st, 2nd, ...
+  const same = all('assignments').filter((g) => g.athleteId === assignment.athleteId && get('blocks', g.blockId)?.kind !== 'warmup' && categoryOf(get('blocks', g.blockId)) === cat)
     .sort((x, y) => (x.startDate || '').localeCompare(y.startDate || '') || x.id.localeCompare(y.id));
-  const taken = new Set(mine.filter((g) => Number.isInteger(g.color)).map((g) => g.color % PROGRAM_COLORS));
-  let c = 0;
-  for (const g of mine) {
-    if (Number.isInteger(g.color)) continue;
-    while (taken.has(c % PROGRAM_COLORS) && taken.size < PROGRAM_COLORS) c++;
-    if (g.id === assignment.id) return c % PROGRAM_COLORS;
-    taken.add(c % PROGRAM_COLORS);
-  }
-  return 0;
-}
-// The color for a new assignment: the first one the athlete isn't using now.
-export function freeColor(athleteId, iso) {
-  const used = new Set(assignmentsFor(athleteId).filter((g) => {
-    const b = get('blocks', g.blockId);
-    return b && b.kind !== 'warmup' && assignmentStatus(g, b, iso) !== 'ended';
-  }).map(programColor));
-  for (let c = 0; c < PROGRAM_COLORS; c++) if (!used.has(c)) return c;
-  return used.size % PROGRAM_COLORS;
+  const i = Math.max(0, same.findIndex((g) => g.id === assignment.id));
+  const colors = CAT[cat].colors;
+  return colors[i % colors.length];
 }
 // A log's program tag: {name, color}, or null for a warmup or a log with no program.
 export function logProgram(log) {
   if (!log || log.warmup || !log.blockId) return null;
   const g = log.assignmentId && get('assignments', log.assignmentId);
   const b = get('blocks', log.blockId) || (g && get('blocks', g.blockId));
-  return { name: b?.name || 'Old program', color: g ? programColor(g) : 0, assignmentId: g?.id || null };
+  const cat = log.category || categoryOf(b);
+  return { name: b?.name || 'Old program', color: g ? programColor(g) : CAT[cat].colors[0], assignmentId: g?.id || null, category: cat };
 }
 
 // How far an athlete is through one assigned program, for the coach:
@@ -364,10 +369,16 @@ export function warmupOn(athleteId, iso) {
   return null;
 }
 
-export function logId(athleteId, iso) { return `${athleteId}:${iso}`; }
-export function logFor(athleteId, iso) { return get('logs', logId(athleteId, iso)); }
+// Strength workouts keep the plain id (all workouts before categories were
+// strength); other categories get their own: "ath-1:2026-11-14:throwing".
+export function logId(athleteId, iso, cat = 'strength') { return cat && cat !== 'strength' ? `${athleteId}:${iso}:${cat}` : `${athleteId}:${iso}`; }
+export function logFor(athleteId, iso, cat = 'strength') { return get('logs', logId(athleteId, iso, cat)); }
+// Every workout (not warmup) logged on a date, in category order.
+export function logsOn(athleteId, iso) {
+  return CATEGORIES.map((c) => logFor(athleteId, iso, c.k)).filter(Boolean);
+}
 // The warmup is logged on its own, next to the day's workout.
-export function warmupLogFor(athleteId, iso) { return get('logs', `${logId(athleteId, iso)}:warmup`); }
+export function warmupLogFor(athleteId, iso) { return get('logs', `${athleteId}:${iso}:warmup`); }
 
 // Each athlete's logs, oldest first. Pages ask for these many times over (the
 // coach's Team page does for every athlete), so they're grouped once and the
@@ -425,12 +436,13 @@ const lastDone = (athleteId, block, dayIndex, week, beforeIso) => lastDoneFrom(l
 
 // Start (or reopen) a log for a planned session.
 export function startLog(athleteId, iso, plan) {
-  const existing = logFor(athleteId, iso);
+  const cat = categoryOf(plan.block);
+  const existing = logFor(athleteId, iso, cat);
   if (existing && existing.blockId === plan.block.id && existing.week === plan.week && existing.dayIndex === plan.dayIndex) return existing;
   const athlete = get('athletes', athleteId);
   const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
   return keepLog({
-    id: logId(athleteId, iso), athleteId, date: iso,
+    id: logId(athleteId, iso, cat), athleteId, date: iso, ...(cat === 'strength' ? {} : { category: cat }),
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
     entries: sessionEntries(s, unit()),
@@ -449,7 +461,7 @@ export function startWarmupLog(athleteId, iso, w) {
   if (existing && existing.blockId === w.block.id) return existing;
   const s = buildSession(w.block, 0, 0, get('athletes', athleteId), roundStep());
   return keepLog({
-    id: `${logId(athleteId, iso)}:warmup`, athleteId, date: iso, warmup: true,
+    id: `${athleteId}:${iso}:warmup`, athleteId, date: iso, warmup: true,
     assignmentId: w.assignment.id, blockId: w.block.id, week: 0, dayIndex: 0, name: w.block.name,
     entries: sessionEntries(s, unit()),
     sessionRpe: null, minutes: null, note: '', finished: false,
@@ -479,14 +491,14 @@ export function refreshLog(log) {
 // logged yet) follows the program: if the coach since moved them to another
 // program or day, or removed it, the old workout is replaced or dropped.
 // Logs with anything in them, or a workout the athlete picked, stay put.
-export function currentLog(athleteId, iso) {
-  const log = logFor(athleteId, iso);
+export function currentLog(athleteId, iso, cat = 'strength') {
+  const log = logFor(athleteId, iso, cat);
   // A workout the athlete picked on a rest day stays put. A day switched to
   // another workout stays too, unless the program it came from has since been
   // removed (then, with nothing logged, it's a leftover like any other).
   const picked = log && (log.chosen || (log.switchedFrom !== undefined && (!log.assignmentId || get('assignments', log.assignmentId))));
   if (!log || picked || !untouchedLog(log)) return refreshLog(log);
-  const plan = plannedOn(athleteId, iso)[0];
+  const plan = plannedIn(athleteId, iso, cat)[0];
   if (!plan) { if (ownsLogs()) del('logs', log.id); return null; }
   if (plan.block.id !== log.blockId || plan.week !== log.week || plan.dayIndex !== log.dayIndex) return startLog(athleteId, iso, plan);
   return refreshLog(log);

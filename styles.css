@@ -855,3 +855,7 @@ button.last b { color: var(--track); white-space: nowrap; font-weight: 650; }
 .swatch i { width: 26px; height: 26px; border-radius: 50%; background: var(--pc); }
 .swatch:has(input:checked) { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--pc); }
 .swatch:has(input:focus-visible) { outline: 3px solid var(--track); outline-offset: 2px; }
+.ask-field select { width: 100%; }
+.cat-head { margin: 16px 0 8px; font: 700 0.75rem var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cat-head:first-child { margin-top: 0; }
+.cat-head + .asg-card { border-top: 0; margin-top: 0; padding-top: 0; }
