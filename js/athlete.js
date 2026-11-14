@@ -17,7 +17,7 @@ const isCoach = () => store.settings().me?.role === 'coach';
 function coachBack(id) {
   if (!isCoach()) return '';
   const a = store.get('athletes', id);
-  return `<a class="back" href="#/coach/athlete/${id}">‹ ${esc(a?.name || 'Athlete')}</a>`;
+  return `<a class="back" href="#/coach/athlete/${id}">${esc(a?.name || 'Athlete')}</a>`;
 }
 
 function dateStrip(athleteId, iso) {
@@ -117,12 +117,10 @@ function warmRow(id, iso, name, count, log) {
     <span class="status ${st.cls || 'warm'}">${st.cls ? st.txt : 'Do first'}</span><span class="chev"></span></a>`;
 }
 
-// Today: the day's warmup and workout, with a preview of what's in it.
-export function today_(root, { id }, query) {
-  store.fillMaxes(id);
-  const athlete = store.get('athletes', id);
-  if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
-  const iso = query.get('d') || today();
+// The day's warmup row and workout card (or rest-day note), as the athlete
+// sees them on Today. `peek` is the coach's hover preview: just the cards,
+// nothing to press. Reading never saves anything (see store.keepLog).
+export function dayCards(id, iso, { peek = false } = {}) {
   const plans = store.plannedOn(id, iso);
   const log = store.currentLog(id, iso);
   // The assigned warmup gets its own row, above the workout.
@@ -141,16 +139,28 @@ export function today_(root, { id }, query) {
   } else {
     let next = null;
     for (let k = 1; k <= 14 && !next; k++) { const d = addDays(iso, k); const pl = store.plannedOn(id, d)[0]; if (pl) next = { d, name: pl.block.days[pl.dayIndex].name }; }
+    // "Do a workout anyway" saves a workout for the athlete, so a coach doesn't get it.
     body = `<div class="empty"><b>Rest day</b><p>${next ? `Next up: ${esc(next.name)}, ${fmtDate(next.d, { weekday: 'long', month: 'short', day: 'numeric' })}.` : 'Nothing is scheduled.'}</p>
-      <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
+      ${peek || isCoach() ? '' : '<button class="btn ghost" data-action="switch">Do a workout anyway</button>'}</div>`;
   }
+  return warm + body;
+}
+
+// Today: the day's warmup and workout, with a preview of what's in it.
+// A coach gets the same page for any athlete and day, marked as a preview.
+export function today_(root, { id }, query) {
+  store.fillMaxes(id);
+  const athlete = store.get('athletes', id);
+  if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
+  const iso = query.get('d') || today();
   const last = store.logsFor(id).filter((l) => !l.warmup && l.date < iso && loggedWork(l)).pop();
 
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
+    ${isCoach() ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
     ${dateStrip(id, iso)}
-    ${warm}${body}
+    ${dayCards(id, iso)}
     ${last ? `<p class="last-line"><span>Last session</span><a href="#/athlete/${id}/session/${last.date}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
 
   bindActions(root, {
