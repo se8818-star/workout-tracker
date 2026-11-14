@@ -311,3 +311,22 @@ test('libraryView sorts by name or groups by movement type, with filters', async
   assert.deepEqual(libraryView(list, { filters: { pattern: ['carry'] } }), []);
   assert.equal(filterCount({ pattern: ['push', 'core'], body: [], extra: ['video'] }), 3);
 });
+
+test('nextOpenEntry: next unfinished exercise after the one just finished', async () => {
+  const { nextOpenEntry } = await import('../js/calc.js');
+  const E = (done, extra = {}) => ({ sets: done.map((d) => ({ done: d })), ...extra });
+  // plain list: goes to the next one down
+  assert.equal(nextOpenEntry([E([true]), E([false]), E([false])], 0), 1);
+  // skips finished ones and wraps back to a skipped exercise above
+  assert.equal(nextOpenEntry([E([false]), E([true]), E([true])], 2), 0);
+  assert.equal(nextOpenEntry([E([false]), E([true]), E([true]), E([false, false])], 1), 3);
+  // superset: the rest of the group first, even if something else is earlier
+  assert.equal(nextOpenEntry([E([false]), E([false], { group: 'B' }), E([true], { group: 'B' }), E([false], { group: 'B' })], 2), 3);
+  assert.equal(nextOpenEntry([E([true], { group: 'A' }), E([false], { group: 'A' }), E([false])], 0), 1);
+  // whole superset done: on to the next exercise
+  assert.equal(nextOpenEntry([E([true], { group: 'A' }), E([true], { group: 'A' }), E([false])], 1), 2);
+  // warmup group letters don't pull in a main-work superset
+  assert.equal(nextOpenEntry([E([true], { group: 'A', warmup: true }), E([false]), E([false], { group: 'A' })], 0), 1);
+  // empty exercises are passed over, nothing left = null
+  assert.equal(nextOpenEntry([E([true]), E([]), E([true])], 0), null);
+});

@@ -9,6 +9,20 @@
   <script>
     // Dark or Match my phone, picked on the More page; set before the page draws so it doesn't flash.
     try { const t = localStorage.getItem('wt-theme'); if (t === 'auto' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    // Start opening saved data now, while the app's files download (js/store.js picks it up).
+    window.wtDisk = new Promise(function (resolve) {
+      try {
+        var req = indexedDB.open('chunky-training', 1);
+        req.onupgradeneeded = function () { req.result.createObjectStore('parts'); };
+        req.onerror = req.onblocked = function () { resolve(null); };
+        req.onsuccess = function () {
+          var conn = req.result, os = conn.transaction('parts').objectStore('parts');
+          var keys = os.getAllKeys(), vals = os.getAll();
+          vals.onsuccess = function () { resolve({ conn: conn, entries: keys.result.map(function (k, i) { return [k, vals.result[i]]; }) }); };
+          vals.onerror = function () { resolve({ conn: conn, entries: null }); };
+        };
+      } catch (e) { resolve(null); }
+    });
   </script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">

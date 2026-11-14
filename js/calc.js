@@ -585,3 +585,19 @@ export function parseQuickEntry(line) {
   }
   return out;
 }
+
+// Workout page: which exercise to open after exercise `i` was just finished.
+// In a superset the next unfinished exercise of the same group comes first
+// (the athlete is still going round it); otherwise the next unfinished
+// exercise further down, then any skipped one above. null = nothing left.
+export function nextOpenEntry(entries, i) {
+  const left = (e) => e.sets.length > 0 && !e.sets.every((s) => s.done);
+  const cur = entries[i];
+  const n = entries.length;
+  const order = Array.from({ length: n - 1 }, (_, d) => (i + 1 + d) % n);
+  if (cur?.group) {
+    const mate = order.find((k) => entries[k].group === cur.group && !entries[k].warmup === !cur.warmup && left(entries[k]));
+    if (mate != null) return mate;
+  }
+  return order.find((k) => left(entries[k])) ?? null;
+}
