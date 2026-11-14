@@ -17,7 +17,7 @@ const isCoach = () => store.settings().me?.role === 'coach';
 function coachBack(id) {
   if (!isCoach()) return '';
   const a = store.get('athletes', id);
-  return `<a class="back" href="#/coach/athlete/${id}">‹ ${esc(a?.name || 'Athlete')}</a>`;
+  return `<a class="back" href="#/coach/athlete/${id}">${esc(a?.name || 'Athlete')}</a>`;
 }
 
 function dateStrip(athleteId, iso) {
@@ -129,12 +129,13 @@ function warmRow(id, iso, name, count, log) {
     <span class="status ${st.cls || 'warm'}">${st.cls ? st.txt : 'Do first'}</span><span class="chev"></span></a>`;
 }
 
-// Today: the day's warmup and workout, with a preview of what's in it.
-export function today_(root, { id }, query) {
-  store.fillMaxes(id);
-  const athlete = store.get('athletes', id);
-  if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
-  const iso = query.get('d') || today();
+// The day's warmup row and workout cards (or rest-day note), as the athlete
+// sees them on Today. `peek` is the coach's hover preview: just the cards,
+// nothing to press. Reading never saves anything (see store.keepLog), and the
+// buttons that would save a workout for the athlete are left out for a coach.
+// Returns { html, others } (others: the "Also today" plans, for doOther).
+export function dayCards(id, iso, { peek = false } = {}) {
+  const look = peek || isCoach();
   // The assigned warmup gets its own row, above the workouts.
   const wlog = store.currentWarmupLog(id, iso), w = store.warmupOn(id, iso);
   const warm = wlog ? warmRow(id, iso, wlog.name, wlog.entries.length, wlog)
@@ -162,23 +163,34 @@ export function today_(root, { id }, query) {
     const alt = (!log || untouchedLog(log)) ? plans.filter((p) => p.assignment.id !== shownId) : [];
     return card + alt.map((p) => { others.push(p); return `<div class="also-today"><span class="grow"><span class="muted small">Also today</span><br>
       ${progTag(p.block.name, store.programColor(p.assignment), p.week)} <b>${esc(p.block.days[p.dayIndex].name)}</b></span>
-      <button class="chip" data-action="doOther" data-k="${others.length - 1}">Do this one instead</button></div>`; }).join('');
+      ${look ? '' : `<button class="chip" data-action="doOther" data-k="${others.length - 1}">Do this one instead</button>`}</div>`; }).join('');
   }).join('');
   let body = cards;
   if (!cards) {
     let next = null;
     for (let k = 1; k <= 14 && !next; k++) { const d = addDays(iso, k); const pl = store.plannedOn(id, d)[0]; if (pl) next = { d, name: pl.block.days[pl.dayIndex].name }; }
     body = `<div class="empty"><b>Rest day</b><p>${next ? `Next up: ${esc(next.name)}, ${fmtDate(next.d, { weekday: 'long', month: 'short', day: 'numeric' })}.` : 'Nothing is scheduled.'}</p>
-      <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
+      ${look ? '' : '<button class="btn ghost" data-action="switch">Do a workout anyway</button>'}</div>`;
   }
-  const also = '';
+  return { html: warm + body, others };
+}
+
+// Today: the day's warmup and workouts, with a preview of what's in them.
+// A coach gets the same page for any athlete and day, marked as a preview.
+export function today_(root, { id }, query) {
+  store.fillMaxes(id);
+  const athlete = store.get('athletes', id);
+  if (!athlete) { root.innerHTML = '<p class="empty">Athlete not found.</p>'; return; }
+  const iso = query.get('d') || today();
+  const { html, others } = dayCards(id, iso);
   const last = store.logsFor(id).filter((l) => !l.warmup && l.date < iso && loggedWork(l)).pop();
 
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
+    ${isCoach() ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
     ${dateStrip(id, iso)}
-    ${warm}${body}${also}
+    ${html}
     ${last ? `<p class="last-line"><span>Last session</span><a href="${sessionHref(last)}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
 
   bindActions(root, {

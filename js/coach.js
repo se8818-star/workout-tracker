@@ -5,7 +5,7 @@ import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, ad
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
-import { pickExerciseSheet, videoSheet, maxPicker, pickMax, sessionHref } from './athlete.js';
+import { pickExerciseSheet, videoSheet, maxPicker, pickMax, sessionHref, dayCards } from './athlete.js';
 import { TEMPLATES } from './templates.js';
 import { planLibraryImport } from './libimport.js';
 import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
@@ -139,7 +139,10 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
     return mine.length ? `<h4 class="cat-head">${label}</h4>${mine.map(asgCard).join('')}` : '';
   }).join('');
   const dayColor = (d) => { const pg = store.logProgram(d.log); if (pg) return pg.color; const p = store.plannedOn(id, d.iso)[0]; return p ? store.programColor(p.assignment) : null; };
-  const days = w.days.map((d) => { const c = dayColor(d); return `<span class="day ${d.iso === today() ? 'today on' : ''} ${d.planned ? 'planned' : ''} ${loggedWork(d.log) ? 'done' : ''} ${c != null ? `pc${c}` : ''}" style="min-height:0"><span>${fmtDate(d.iso, { weekday: 'narrow' })}</span><b style="width:30px;height:30px;font-size:0.88rem">${Number(d.iso.slice(8))}</b><i${c != null ? ' class="pdot"' : ''}></i></span>`; }).join('');
+  // Each day opens the athlete's own Today page for that day (a preview: the
+  // coach's device saves nothing just from looking). On a computer, hovering
+  // a day shows the same cards in a small pop-over first.
+  const days = w.days.map((d) => { const c = dayColor(d); return `<a class="day ${d.iso === today() ? 'today on' : ''} ${d.planned ? 'planned' : ''} ${loggedWork(d.log) ? 'done' : ''} ${c != null ? `pc${c}` : ''}" style="min-height:0" href="#/athlete/${id}?d=${d.iso}" data-peek="${d.iso}" aria-label="See ${esc(a.name.split(' ')[0])}'s ${fmtDate(d.iso, { weekday: 'long' })}"><span>${fmtDate(d.iso, { weekday: 'narrow' })}</span><b style="width:30px;height:30px;font-size:0.88rem">${Number(d.iso.slice(8))}</b><i${c != null ? ' class="pdot"' : ''}></i></a>`; }).join('');
   const logHtml = (list) => list.map((l) => {
         const t = sessionTotals(l, ex, true);
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
@@ -158,7 +161,8 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
   const views = {
     overview: `
       <section class="card"><div class="row between"><h3 style="margin:0">This week</h3><span class="muted small">${w.sessionsDone} of ${w.sessionsPlanned} · ${fmt(store.showW(w.done.tonnage))} ${u}</span></div>
-        <div class="date-strip" style="margin:8px -6px 0">${days}</div></section>
+        <div class="date-strip" style="margin:8px -6px 0">${days}</div>
+        <p class="muted small peek-hint">Tap a day to see it the way ${esc(a.name.split(' ')[0])} does.</p></section>
       <section class="card">${current.length ? byCategory(current) : '<p class="muted">No program running right now.</p>'}
         <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a></section>
       <div class="list-head"><span>Recent sessions</span><a href="#/coach/athlete/${id}?tab=log">See all</a></div>
@@ -211,6 +215,37 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
     unassign: async (el) => { if (await ask('Logged sessions stay.', { title: 'Remove this program?', ok: 'Remove program', danger: true })) { store.del('assignments', el.dataset.id); athlete(root, { id }, query); } },
   };
   bindActions(root, handlers);
+  peekDays(root, id);
+}
+
+// Hover pop-over for the coach's week strip: what the athlete's Today page
+// shows for that day. Only on devices with a real mouse; a tap just opens it.
+function peekDays(root, id) {
+  const fine = matchMedia('(hover: hover) and (pointer: fine)');
+  let pop = null, t = null;
+  const hide = () => { clearTimeout(t); pop?.remove(); pop = null; };
+  const show = (el) => {
+    hide();
+    const iso = el.dataset.peek;
+    pop = document.createElement('div');
+    pop.className = 'day-peek';
+    pop.setAttribute('role', 'tooltip');
+    pop.innerHTML = `<p class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</p>${dayCards(id, iso, { peek: true }).html}<p class="muted small">Click to open</p>`;
+    document.body.append(pop);
+    const r = el.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - pw / 2, innerWidth - pw - 8));
+    const below = r.bottom + 8 + ph <= innerHeight - 8;
+    pop.style.left = `${left}px`;
+    pop.style.top = `${below ? r.bottom + 8 : Math.max(8, r.top - ph - 8)}px`;
+  };
+  root.querySelectorAll('[data-peek]').forEach((el) => {
+    el.addEventListener('mouseenter', () => { if (!fine.matches) return; clearTimeout(t); t = setTimeout(() => show(el), 180); });
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('click', hide);
+  });
+  // Gone when the page redraws or changes.
+  const prev = root._unbind;
+  root._unbind = () => { prev?.(); hide(); };
 }
 
 // ---------- blocks ----------
