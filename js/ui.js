@@ -6,6 +6,11 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// A program's colored tag: "● Fall 2026 · Wk 3". `color` is store.programColor.
+export function progTag(name, color = 0, week = null) {
+  return `<span class="prog-tag pc${color}">${esc(name)}${week != null ? ` <span class="wk">· Wk ${week + 1}</span>` : ''}</span>`;
+}
+
 export function fmt(n, digits = 0) {
   if (n == null || Number.isNaN(n)) return '–';
   return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -100,7 +105,9 @@ export function choose(title, message, options, { cancel = 'Cancel' } = {}) {
 export function askFields(title, fields, { ok = 'Save', cancel = 'Cancel' } = {}) {
   return new Promise((resolve) => {
     const wrap = sheet(title, `<form class="ask-form">
-      ${fields.map((f) => `<label class="ask-field"><span>${esc(f.label)}</span><input name="${esc(f.k)}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off"></label>`).join('')}
+      ${fields.map((f) => `<label class="ask-field"><span>${esc(f.label)}</span>${f.options
+        ? `<select name="${esc(f.k)}">${f.options.map(([v, label]) => `<option value="${esc(v)}" ${v === f.value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`
+        : `<input name="${esc(f.k)}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off">`}</label>`).join('')}
       <div class="ask-btns"><button type="button" class="btn ghost" data-close>${esc(cancel)}</button><button class="btn">${esc(ok)}</button></div></form>`);
     wrap.classList.add('ask');
     wrap._onClose = () => resolve(null);

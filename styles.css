@@ -32,6 +32,12 @@
   --head: "Anybody", "Arial Narrow", sans-serif;
   --body: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
   --mono: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif; /* kept as a name; numbers use tabular figures */
+  --p0: #2f5fd0; --p0-soft: #e6edfb;   /* program tags: blue */
+  --p1: #7a45c4; --p1-soft: #f0e8fa;   /* violet */
+  --p2: #0f7f86; --p2-soft: #e0f2f2;   /* teal */
+  --p3: #c2357a; --p3-soft: #fae6ef;   /* pink */
+  --p4: #a2581c; --p4-soft: #f6ebe1;   /* rust */
+  --p5: #4e5a6b; --p5-soft: #e9ecf0;   /* slate */
   color-scheme: light;
 }
 /* Dark theme. The app is light unless the person picks Dark, or "Match my
@@ -43,6 +49,8 @@
     --line: #2c2b28; --line-2: #3a3935; --track: #ef5a43; --track-soft: #3a1f1a; --turf: #3fb57a; --turf-soft: #15301f;
     --warn: #e2a94a; --warn-soft: #3a2e12; --danger: #f06b5e; --hi: #e2a94a; --hi-soft: #33290f;
     --scrim: rgb(0 0 0 / 0.55); --bar-bg: rgb(22 22 20 / 0.88); --shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
+    --p0: #7ea3ff; --p0-soft: #1c2640; --p1: #b994f0; --p1-soft: #2a2140; --p2: #52c4c9; --p2-soft: #12302f;
+    --p3: #f07bb3; --p3-soft: #3a1a2a; --p4: #e09a5e; --p4-soft: #36251a; --p5: #a7b2c2; --p5-soft: #262a30;
     color-scheme: dark;
   }
 }
@@ -51,6 +59,8 @@
   --line: #2c2b28; --line-2: #3a3935; --track: #ef5a43; --track-soft: #3a1f1a; --turf: #3fb57a; --turf-soft: #15301f;
   --warn: #e2a94a; --warn-soft: #3a2e12; --danger: #f06b5e; --hi: #e2a94a; --hi-soft: #33290f;
   --scrim: rgb(0 0 0 / 0.55); --bar-bg: rgb(22 22 20 / 0.88); --shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --p0: #7ea3ff; --p0-soft: #1c2640; --p1: #b994f0; --p1-soft: #2a2140; --p2: #52c4c9; --p2-soft: #12302f;
+  --p3: #f07bb3; --p3-soft: #3a1a2a; --p4: #e09a5e; --p4-soft: #36251a; --p5: #a7b2c2; --p5-soft: #262a30;
   color-scheme: dark;
 }
 
@@ -808,3 +818,44 @@ button.last b { color: var(--track); white-space: nowrap; font-weight: 650; }
 .list-head > span { white-space: nowrap; }
 .title-input { font-size: 1.6rem; }
 .list .note { font-style: italic; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+/* Program tags: each program an athlete is on gets its own color, so two
+   programs at once are easy to tell apart (store.programColor). */
+.pc0 { --pc: var(--p0); --pc-soft: var(--p0-soft); }
+.pc1 { --pc: var(--p1); --pc-soft: var(--p1-soft); }
+.pc2 { --pc: var(--p2); --pc-soft: var(--p2-soft); }
+.pc3 { --pc: var(--p3); --pc-soft: var(--p3-soft); }
+.pc4 { --pc: var(--p4); --pc-soft: var(--p4-soft); }
+.pc5 { --pc: var(--p5); --pc-soft: var(--p5-soft); }
+.prog-tag {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 9px 2px 7px; border-radius: 99px;
+  background: var(--pc-soft, var(--fill)); color: var(--pc, var(--muted)); font: 700 0.76rem var(--body); vertical-align: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.prog-tag::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pc, var(--faint)); }
+.prog-tag .wk { color: var(--muted); font-weight: 600; }
+.wc-top .prog-tag { min-width: 0; }
+.day.planned i.pdot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--pc); width: 6px; height: 6px; }
+.day.done i.pdot { background: var(--pc); box-shadow: none; width: 6px; height: 6px; }
+/* coach: one card per program, with its color down the left */
+.asg-card.prog { border-left: 4px solid var(--pc); padding-left: 12px; }
+.prog-count { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font-size: 0.85rem; }
+.prog-count b { font-variant-numeric: tabular-nums; }
+.asg-card.prog .prog-bar i { background: var(--pc); }
+.also-today {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -4px 0 14px; padding: 10px 14px;
+  background: var(--card); border: 1px dashed var(--line-2); border-radius: var(--r-card); font-size: 0.9rem;
+}
+.also-today .grow { flex: 1; min-width: 0; }
+.prog-summary { display: grid; gap: 8px; }
+.prog-summary .row { gap: 10px; }
+.color-pick { gap: 10px; }
+.swatch { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; }
+.swatch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.swatch i { width: 26px; height: 26px; border-radius: 50%; background: var(--pc); }
+.swatch:has(input:checked) { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--pc); }
+.swatch:has(input:focus-visible) { outline: 3px solid var(--track); outline-offset: 2px; }
+.ask-field select { width: 100%; }
+.cat-head { margin: 16px 0 8px; font: 700 0.75rem var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cat-head:first-child { margin-top: 0; }
+.cat-head + .asg-card { border-top: 0; margin-top: 0; padding-top: 0; }
