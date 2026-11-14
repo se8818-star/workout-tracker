@@ -1,9 +1,9 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, untouchedLog, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
+import { esc, fmt, fmtDate, progTag, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
@@ -26,11 +26,15 @@ function dateStrip(athleteId, iso) {
   html += `<button class="icon-btn" data-action="goDate" data-date="${addDays(mon, -7)}" aria-label="Previous week">‹</button>`;
   for (let i = 0; i < 7; i++) {
     const d = addDays(mon, i);
-    const planned = store.plannedOn(athleteId, d).length > 0 || !!store.warmupOn(athleteId, d);
+    const plan = store.plannedOn(athleteId, d)[0];
+    const planned = !!plan || !!store.warmupOn(athleteId, d);
     const log = store.logFor(athleteId, d);
-    const cls = [d === iso && 'on', d === today() && 'today', planned && 'planned', log?.finished && 'done'].filter(Boolean).join(' ');
+    // The dot takes the color of the day's program (the one logged, if any).
+    const prog = store.logProgram(log);
+    const color = prog ? prog.color : plan ? store.programColor(plan.assignment) : null;
+    const cls = [d === iso && 'on', d === today() && 'today', planned && 'planned', log?.finished && 'done', color != null && `pc${color}`].filter(Boolean).join(' ');
     html += `<button class="day ${cls}" data-action="goDate" data-date="${d}">
-      <span>${fmtDate(d, { weekday: 'narrow' })}</span><b>${Number(d.slice(8))}</b><i></i></button>`;
+      <span>${fmtDate(d, { weekday: 'narrow' })}</span><b>${Number(d.slice(8))}</b><i${color != null ? ' class="pdot"' : ''}></i></button>`;
   }
   html += `<button class="icon-btn" data-action="goDate" data-date="${addDays(mon, 7)}" aria-label="Next week">›</button></nav>`;
   return html;
@@ -102,7 +106,7 @@ function workoutCard(id, iso, title, sub, entries, log, pill = '') {
   const more = entries.length - shown.length;
   const go = { done: 'View workout', live: 'Continue workout' }[st.cls] || 'Start workout';
   return `<a class="workout-card ${st.cls}" href="#/athlete/${id}/session/${iso}">
-    <div class="wc-top"><span class="kicker">${esc(sub)}</span>${st.cls ? `<span class="status ${st.cls}">${st.txt}</span>` : pill}</div>
+    <div class="wc-top">${sub}${st.cls ? `<span class="status ${st.cls}">${st.txt}</span>` : pill}</div>
     <h2>${esc(title)}</h2>
     <ul class="wc-list">${shown.map((e) => `<li><span>${esc(ex[e.exerciseId]?.name || e.exerciseId)}</span><span>${esc(entrySummary(e, ex[e.exerciseId]))}</span></li>`).join('')}
       ${more > 0 ? `<li class="more"><span>+ ${more} more</span><span></span></li>` : ''}</ul>
@@ -133,10 +137,11 @@ export function today_(root, { id }, query) {
   let body;
   if (log) {
     const block = store.get('blocks', log.blockId);
-    body = workoutCard(id, iso, log.name, block ? `${block.name} · Week ${log.week + 1}` : 'Workout', log.entries, log);
+    const prog = store.logProgram(log);
+    body = workoutCard(id, iso, log.name, prog ? progTag(prog.name, prog.color, log.week) : '<span class="kicker">Workout</span>', log.entries, log);
   } else if (plans.length) {
     const p = plans[0];
-    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, `${p.block.name} · Week ${p.week + 1}`, store.previewEntries(id, iso, p), null,
+    body = workoutCard(id, iso, p.block.days[p.dayIndex].name, progTag(p.block.name, store.programColor(p.assignment), p.week), store.previewEntries(id, iso, p), null,
       p.block.deloadWeek === p.week ? '<span class="status">Deload</span>' : '');
   } else {
     let next = null;
@@ -144,17 +149,30 @@ export function today_(root, { id }, query) {
     body = `<div class="empty"><b>Rest day</b><p>${next ? `Next up: ${esc(next.name)}, ${fmtDate(next.d, { weekday: 'long', month: 'short', day: 'numeric' })}.` : 'Nothing is scheduled.'}</p>
       <button class="btn ghost" data-action="switch">Do a workout anyway</button></div>`;
   }
+  // On more than one program, two can land on the same day: the newest is the
+  // one shown, the others can be done instead while nothing is logged yet.
+  const shownId = log ? log.assignmentId : plans[0]?.assignment.id;
+  const others = (!log || untouchedLog(log)) ? plans.filter((p) => p.assignment.id !== shownId) : [];
+  const also = others.map((p, k) => `<div class="also-today"><span class="grow"><span class="muted small">Also today</span><br>
+      ${progTag(p.block.name, store.programColor(p.assignment), p.week)} <b>${esc(p.block.days[p.dayIndex].name)}</b></span>
+      <button class="chip" data-action="doOther" data-k="${k}">Do this one instead</button></div>`).join('');
   const last = store.logsFor(id).filter((l) => !l.warmup && l.date < iso && loggedWork(l)).pop();
 
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
     ${dateStrip(id, iso)}
-    ${warm}${body}
+    ${warm}${body}${also}
     ${last ? `<p class="last-line"><span>Last session</span><a href="#/athlete/${id}/session/${last.date}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
 
   bindActions(root, {
     goDate: (el) => { location.hash = `#/athlete/${id}?d=${el.dataset.date}`; },
+    doOther: (el) => {
+      const l = store.startLog(id, iso, others[Number(el.dataset.k)]);
+      l.chosen = true; // stays even with nothing logged, instead of going back to the newest program
+      store.saveLog(l);
+      location.hash = `#/athlete/${id}/session/${iso}`;
+    },
     switch: () => switchSheet(id, iso, (plan) => {
       const l = store.startLog(id, iso, plan);
       l.chosen = true; // picked by the athlete, so it stays even with nothing logged
@@ -273,7 +291,7 @@ export function session(root, { id, date, warm = false }) {
       <div class="sb-row"><span class="sb-title">${esc(warm ? 'Warmup' : log.name)}</span><span class="sb-count" id="sb-count"><b>${nDone}</b> of ${nAll} sets</span></div>
       <div class="progress"><i id="sb-bar" style="width:${nAll ? (nDone / nAll) * 100 : 0}%"></i></div>
     </div>
-    <p class="kicker">${esc(warm ? 'Before your workout' : block ? `${block.name} · Week ${log.week + 1}` : '')}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
+    <p class="kicker">${warm ? 'Before your workout' : block ? (() => { const pg = store.logProgram(log); return progTag(pg.name, pg.color, log.week); })() : ''}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
     ${!warm && isCoach() && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
     <div style="height:10px"></div>
     ${warm ? log.entries.map((e, i) => entryCard(log, e, i, labels[i], folds[i])).join('') : log.entries.map((e, i) => {
@@ -658,7 +676,7 @@ function switchSheet(athleteId, iso, onPick) {
   if (!groups.length) { toast('No program assigned yet. Ask your coach.'); return; }
   const html = groups.map(({ a, block }) => {
     const curWeek = Math.max(0, Math.min(block.weeks - 1, Math.floor((new Date(iso) - new Date(a.startDate)) / (7 * 86400000))));
-    let h = `<h3>${esc(block.name)}</h3><p class="muted">Pick any day. Week ${curWeek + 1} is this week.</p>`;
+    let h = `<h3>${progTag(block.name, store.programColor(a))}</h3><p class="muted">Pick any day. Week ${curWeek + 1} is this week.</p>`;
     for (let w = 0; w < block.weeks; w++) {
       h += `<details ${w === curWeek ? 'open' : ''}><summary>Week ${w + 1}${block.deloadWeek === w ? ' (deload)' : ''}</summary><ul class="pick">`;
       block.days.forEach((d, di) => {
@@ -817,7 +835,7 @@ export function history(root, { id }) {
           const t = sessionTotals(l, ex, true);
           const notes = [l.note, ...l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`)].filter(Boolean);
           return `<a href="#/athlete/${id}/session/${l.date}"><span class="grow"><span class="name">${esc(l.name)}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><br>
-            <span class="sub">${fmtDate(l.date)}${l.sessionRpe ? ` · effort ${l.sessionRpe}` : ''}${l.minutes ? ` · ${l.minutes} min` : ''}</span>
+            <span class="sub">${(() => { const pg = store.logProgram(l); return pg ? `${progTag(pg.name, pg.color)} ` : ''; })()}${fmtDate(l.date)}${l.sessionRpe ? ` · effort ${l.sessionRpe}` : ''}${l.minutes ? ` · ${l.minutes} min` : ''}</span>
             ${notes.length ? `<br><span class="sub note">“${esc(notes.join(' · '))}”</span>` : ''}</span>
             <span class="right"><b>${fmt(store.showW(t.tonnage))}</b> ${u}${t.contacts ? `<br>${fmt(t.contacts)} contacts` : ''}</span><span class="chev"></span></a>`;
         }).join('')}</div>`).join('');

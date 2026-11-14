@@ -6,6 +6,11 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// A program's colored tag: "● Fall 2026 · Wk 3". `color` is store.programColor.
+export function progTag(name, color = 0, week = null) {
+  return `<span class="prog-tag pc${color}">${esc(name)}${week != null ? ` <span class="wk">· Wk ${week + 1}</span>` : ''}</span>`;
+}
+
 export function fmt(n, digits = 0) {
   if (n == null || Number.isNaN(n)) return '–';
   return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });

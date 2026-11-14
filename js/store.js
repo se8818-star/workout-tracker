@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, addDays, loggedWork, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -156,6 +156,63 @@ export function plannedOn(athleteId, iso) {
     if (at) out.push({ assignment: a, block, ...at });
   }
   return out;
+}
+
+// ---- program tags: a color per assigned program, so an athlete on more than
+// one can tell them apart. Colors are numbered 0..PROGRAM_COLORS-1 (styles.css
+// .pc0...). A coach can pick one; otherwise each new program gets the first
+// color the athlete's other programs aren't using.
+export const PROGRAM_COLORS = 6;
+export function programColor(assignment) {
+  if (!assignment) return 0;
+  if (Number.isInteger(assignment.color)) return assignment.color % PROGRAM_COLORS;
+  const mine = all('assignments').filter((g) => g.athleteId === assignment.athleteId && get('blocks', g.blockId)?.kind !== 'warmup')
+    .sort((x, y) => (x.startDate || '').localeCompare(y.startDate || '') || x.id.localeCompare(y.id));
+  const taken = new Set(mine.filter((g) => Number.isInteger(g.color)).map((g) => g.color % PROGRAM_COLORS));
+  let c = 0;
+  for (const g of mine) {
+    if (Number.isInteger(g.color)) continue;
+    while (taken.has(c % PROGRAM_COLORS) && taken.size < PROGRAM_COLORS) c++;
+    if (g.id === assignment.id) return c % PROGRAM_COLORS;
+    taken.add(c % PROGRAM_COLORS);
+  }
+  return 0;
+}
+// The color for a new assignment: the first one the athlete isn't using now.
+export function freeColor(athleteId, iso) {
+  const used = new Set(assignmentsFor(athleteId).filter((g) => {
+    const b = get('blocks', g.blockId);
+    return b && b.kind !== 'warmup' && assignmentStatus(g, b, iso) !== 'ended';
+  }).map(programColor));
+  for (let c = 0; c < PROGRAM_COLORS; c++) if (!used.has(c)) return c;
+  return used.size % PROGRAM_COLORS;
+}
+// A log's program tag: {name, color}, or null for a warmup or a log with no program.
+export function logProgram(log) {
+  if (!log || log.warmup || !log.blockId) return null;
+  const g = log.assignmentId && get('assignments', log.assignmentId);
+  const b = get('blocks', log.blockId) || (g && get('blocks', g.blockId));
+  return { name: b?.name || 'Old program', color: g ? programColor(g) : 0, assignmentId: g?.id || null };
+}
+
+// How far an athlete is through one assigned program, for the coach:
+// { done, due, total, last } — workouts with logged work from this program
+// (wherever the athlete did them), program days scheduled before `iso`, days
+// in the whole program, and the last date logged.
+export function programProgress(assignment, iso) {
+  const block = get('blocks', assignment.blockId);
+  const logs = logsFor(assignment.athleteId).filter((l) => !l.warmup && l.assignmentId === assignment.id && loggedWork(l));
+  let due = 0, total = 0;
+  if (block && block.kind !== 'warmup') {
+    for (let k = 0; k < block.weeks * 7; k++) {
+      const d = addDays(assignment.startDate, k);
+      if (!scheduledOn(assignment, block, d) || !plannedOn(assignment.athleteId, d).some((p) => p.assignment.id === assignment.id)) continue;
+      total++;
+      // Today counts once it's done; until then it isn't behind yet.
+      if (d < iso || (d === iso && logs.some((l) => l.date === d))) due++;
+    }
+  }
+  return { done: logs.length, due, total, last: logs.length ? logs[logs.length - 1].date : null };
 }
 
 // The warmup assigned for a date: {assignment, block} or null.

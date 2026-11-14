@@ -1,9 +1,9 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, libraryView, libraryMatch, patternOf, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
-import { esc, fmt, fmtDate, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
+import { esc, fmt, fmtDate, progTag, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
 import { pickExerciseSheet, videoSheet, maxPicker, pickMax } from './athlete.js';
 import { TEMPLATES } from './templates.js';
@@ -118,22 +118,31 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
     .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st]);
   const asgCard = ({ g, b, s }) => {
     const w = b && isWarmup(b);
-    const last = store.logsFor(id).filter((l) => l.assignmentId === g.id && loggedWork(l)).pop();
+    const pr = b && !w ? store.programProgress(g, today()) : null;
+    const last = pr ? (pr.last && { date: pr.last }) : store.logsFor(id).filter((l) => l.assignmentId === g.id && loggedWork(l)).pop();
     const wkNow = b && !w && s.st === 'active' ? Math.floor(daysBetween(g.startDate, today()) / 7) + 1 : null;
-    return `<div class="asg-card asg-row ${s.st}">
-      <div class="row between"><b>${esc(b?.name || '?')}${w ? ' <small class="tag-warm">Warmup</small>' : ''}</b>${stateTag(s.st === 'active' ? { st: 'active', txt: 'Active' } : s)}</div>
-      ${wkNow ? `<div class="row between small muted" style="margin-top:6px"><span>Week ${wkNow} of ${b.weeks}</span><span>ends ${shortDate(g.endDate || addDays(g.startDate, b.weeks * 7 - 1))}</span></div><div class="prog-bar"><i style="width:${Math.min(100, Math.round((daysBetween(g.startDate, today()) + 1) / (b.weeks * 7) * 100))}%"></i></div>` : ''}
+    const color = store.programColor(g);
+    // Workouts done from this program out of its days so far: the bar fills as they're done.
+    const count = pr && s.st !== 'upcoming' ? `<div class="prog-count"><span><b>${pr.done}</b> of ${pr.due} workout${pr.due === 1 ? '' : 's'} done so far</span><span class="muted">${pr.total} in all</span></div>
+      <div class="prog-bar" title="${pr.done} of ${pr.total} workouts done"><i style="width:${pr.total ? Math.min(100, Math.round(pr.done / pr.total * 100)) : 0}%"></i></div>` : '';
+    return `<div class="asg-card asg-row ${s.st} ${w ? '' : `prog pc${color}`}">
+      <div class="row between">${w ? `<b>${esc(b?.name || '?')} <small class="tag-warm">Warmup</small></b>` : progTag(b?.name || '?', color)}${stateTag(s.st === 'active' ? { st: 'active', txt: 'Active' } : s)}</div>
+      ${wkNow ? `<div class="row between small muted" style="margin-top:6px"><span>Week ${wkNow} of ${b.weeks}</span><span>ends ${shortDate(g.endDate || addDays(g.startDate, b.weeks * 7 - 1))}</span></div>` : ''}
+      ${count}
       <small class="muted">${last ? `Last logged ${shortDate(last.date)} · ` : ''}${(g.weekdays || []).map((d) => WEEKDAYS[d]).join(', ')}${s.st !== 'active' ? ` · from ${fmtDate(g.startDate)}${g.endDate ? ` to ${fmtDate(g.endDate)}` : ''}` : ''}</small>
       <div class="asg-acts">${w ? `<a class="link" href="#/coach/assignment/${g.id}">Edit</a>` : `<a class="link" href="#/coach/assignment/${g.id}/plan">Change workouts</a><a class="link" href="#/coach/assignment/${g.id}">Schedule</a>`}<button class="link muted-link" data-action="unassign" data-id="${g.id}">Remove</button></div></div>`;
   };
   const current = asgs.filter((x) => x.s.st === 'active' || x.s.st === 'warmup');
-  const days = w.days.map((d) => `<span class="day ${d.iso === today() ? 'today on' : ''} ${d.planned ? 'planned' : ''} ${loggedWork(d.log) ? 'done' : ''}" style="min-height:0"><span>${fmtDate(d.iso, { weekday: 'narrow' })}</span><b style="width:30px;height:30px;font-size:0.88rem">${Number(d.iso.slice(8))}</b><i></i></span>`).join('');
+  const dayColor = (d) => { const pg = store.logProgram(d.log); if (pg) return pg.color; const p = store.plannedOn(id, d.iso)[0]; return p ? store.programColor(p.assignment) : null; };
+  const days = w.days.map((d) => { const c = dayColor(d); return `<span class="day ${d.iso === today() ? 'today on' : ''} ${d.planned ? 'planned' : ''} ${loggedWork(d.log) ? 'done' : ''} ${c != null ? `pc${c}` : ''}" style="min-height:0"><span>${fmtDate(d.iso, { weekday: 'narrow' })}</span><b style="width:30px;height:30px;font-size:0.88rem">${Number(d.iso.slice(8))}</b><i${c != null ? ' class="pdot"' : ''}></i></span>`; }).join('');
   const logHtml = (list) => list.map((l) => {
         const t = sessionTotals(l, ex, true);
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
         const vids = l.entries.flatMap((e) => e.sets.map((s, j) => (videoFresh(s.video) ? `<button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ ${esc(ex[e.exerciseId]?.name || '')} · set ${j + 1}</button>` : ''))).join('');
+        const pg = store.logProgram(l);
         return `<div class="log-item"><div class="row between"><span><a class="log-open" href="#/athlete/${id}/${l.warmup ? 'warmup' : 'session'}/${l.date}">${esc(l.name)}</a>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted small">${fmtDate(l.date)}</span></div>
+          ${pg ? `<p class="small" style="margin:4px 0 0">${progTag(pg.name, pg.color, l.week)}</p>` : ''}
           <p class="muted small">Effort ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u}${t.contacts ? ` · ${fmt(t.contacts)} contacts` : ''}${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
@@ -164,7 +173,7 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
   root.innerHTML = `
     <header class="page-head"><div class="row between"><a class="back" href="#/coach">Team</a><button class="more-btn" data-action="menu" aria-label="More">•••</button></div>
       <div class="row gap" style="gap:12px;margin-top:4px"><span class="avatar big">${esc(initials)}</span><div style="min-width:0"><h1 style="font-size:1.9rem">${esc(a.name)}</h1>
-        <p class="muted small">${esc([a.group, current.find((x) => !isWarmup(x.b || {}))?.g.weekdays?.map((d) => WEEKDAYS[d]).join(', ')].filter(Boolean).join(' · trains '))}</p></div></div></header>
+        <p class="muted small">${esc([a.group, [...new Set(current.filter((x) => x.b && !isWarmup(x.b)).flatMap((x) => x.g.weekdays || []))].sort().map((d) => WEEKDAYS[d]).join(', ')].filter(Boolean).join(' · trains '))}</p></div></div></header>
     <nav class="tabs-seg" aria-label="Sections">${[['overview', 'Overview'], ['program', 'Program'], ['maxes', 'Maxes'], ['log', 'Log']].map(([k, label]) => `<a href="#/coach/athlete/${id}${k === 'overview' ? '' : `?tab=${k}`}" class="${tab === k ? 'on' : ''}">${label}</a>`).join('')}</nav>
     ${views[tab]}`;
   const handlers = {
@@ -220,9 +229,13 @@ function asgState(g, b) {
     return { st, txt: `Ended ${shortDate(isWarmup(b) || (g.endDate && g.endDate < last) ? g.endDate : last)}` };
   }
   if (isWarmup(b)) return { st: 'warmup', txt: 'Running' };
-  const active = store.activeProgram(g.athleteId, iso)?.assignment.id === g.id;
+  // Several programs can run at once, each on its own days. One is hidden
+  // only when it no longer gets any days (another copy of the same program
+  // took over).
+  const shows = Array.from({ length: 14 }, (_, k) => addDays(iso, k)).some((d) => store.plannedOn(g.athleteId, d).some((p) => p.assignment.id === g.id));
+  const ahead = Array.from({ length: 14 }, (_, k) => addDays(iso, k)).some((d) => scheduledOn(g, b, d));
   const wk = `week ${Math.floor(daysBetween(g.startDate, iso) / 7) + 1} of ${b.weeks}`;
-  return active ? { st: 'active', txt: `Active now, ${wk}` } : { st: 'hidden', txt: `Overlaps a newer program, so it isn't shown (${wk})` };
+  return shows || !ahead ? { st: 'active', txt: `Active now, ${wk}` } : { st: 'hidden', txt: `A newer copy of this program took over its days (${wk})` };
 }
 const ORDER = { active: 0, warmup: 1, hidden: 2, upcoming: 3, ended: 4 };
 const stateTag = (s) => `<span class="asg-state ${s.st}">${esc(s.txt)}</span>`;
@@ -976,7 +989,7 @@ export function assign(root, _p, query) {
       }));
       if (current.length) {
         const names = [...new Set(current.map((g) => store.get('athletes', g.athleteId)?.name))].join(', ');
-        if (await ask(`${names} already ${current.length > 1 ? 'have programs' : 'has a program'}. Replace from ${fmtDate(start)}? Their logged workouts stay.`, { title: 'Replace current program?', ok: 'Replace', cancel: 'Keep both' })) {
+        if (await ask(`${names} already ${current.length > 1 ? 'have programs' : 'has a program'}. Replace from ${fmtDate(start)}? Their logged workouts stay. Or keep both: each program runs on its own days with its own color, and you can see which one they're doing.`, { title: 'Replace current program?', ok: 'Replace', cancel: 'Keep both' })) {
           for (const g of current) {
             if (g.startDate >= start) store.del('assignments', g.id);
             else store.put('assignments', { ...g, endDate: addDays(start, -1) });
@@ -986,7 +999,7 @@ export function assign(root, _p, query) {
       for (const athleteId of ids) {
         // One warmup at a time: a new warmup replaces the athlete's current one.
         if (warm) for (const g of store.assignmentsFor(athleteId)) if (isWarmup(store.get('blocks', g.blockId) || {})) store.del('assignments', g.id);
-        store.put('assignments', { id: store.uid('asg'), athleteId, blockId: block.id, startDate: start, weekdays, ...(end ? { endDate: end } : {}) });
+        store.put('assignments', { id: store.uid('asg'), athleteId, blockId: block.id, startDate: start, weekdays, ...(end ? { endDate: end } : {}), ...(warm ? {} : { color: store.freeColor(athleteId, start) }) });
       }
       toast(`Assigned to ${ids.length} athlete${ids.length > 1 ? 's' : ''}`);
       location.hash = '#/coach';
@@ -1190,6 +1203,8 @@ export function assignmentEditor(root, { id }) {
       <label class="field-row"><span>End date (optional)</span><input type="date" id="ae-end" value="${g.endDate || ''}"></label>
       <fieldset><legend>${warm ? 'Days to do it' : `Training days (${b.days.length} per week, in order)`}</legend>
         <div class="row gap wrap">${WEEKDAYS.map((d, i) => `<label class="check-chip"><input type="checkbox" name="wd" value="${i}" ${(g.weekdays || []).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></fieldset>
+      ${warm ? '' : `<fieldset><legend>Color</legend><div class="row gap wrap color-pick">${Array.from({ length: store.PROGRAM_COLORS }, (_, c) => `<label class="swatch pc${c}"><input type="radio" name="pc" value="${c}" ${store.programColor(g) === c ? 'checked' : ''} aria-label="Color ${c + 1}"><i></i></label>`).join('')}</div>
+        <p class="muted small">Tags this program on ${esc(first)}'s days and workouts, so it stands apart from their other programs.</p></fieldset>`}
       <p class="muted small">Workouts ${esc(first)} already logged stay where they are. Days not started yet follow the new schedule. Moving the start date also moves which week of the program each day falls in.</p>
       <button class="btn wide" data-action="save">Save schedule</button>
     </section>
@@ -1210,6 +1225,8 @@ export function assignmentEditor(root, { id }) {
       if (!warm && weekdays.length !== b.days.length) return toast(`Pick exactly ${b.days.length} training days`);
       const next = { ...g, startDate: start, weekdays };
       if (end) next.endDate = end; else delete next.endDate;
+      const pc = root.querySelector('input[name=pc]:checked');
+      if (pc) next.color = Number(pc.value);
       store.put('assignments', next);
       toast('Schedule saved');
       location.hash = `#/coach/athlete/${a.id}`;

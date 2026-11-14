@@ -89,3 +89,40 @@ test('an empty switched-to day goes away once its program is removed', () => {
   store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p', startDate: '2026-11-09', weekdays: [1] });
   assert.equal(store.currentLog('a', '2026-11-09'), null);
 });
+
+test('each program an athlete is on gets its own color, and a coach can pick one', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('p1', 'Lift'));
+  store.put('blocks', blockOf('p2', 'Run'));
+  store.put('blocks', { ...blockOf('w', 'Warm'), kind: 'warmup' });
+  store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'p1', startDate: '2026-11-02', weekdays: [0] });
+  store.put('assignments', { id: 'gw', athleteId: 'a', blockId: 'w', startDate: '2026-11-02', weekdays: [0] });
+  // Older assignments have no color saved: they're numbered in start order.
+  assert.equal(store.programColor(store.get('assignments', 'g1')), 0);
+  const c = store.freeColor('a', '2026-11-09');
+  assert.equal(c, 1);
+  store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p2', startDate: '2026-11-09', weekdays: [1], color: c });
+  assert.equal(store.programColor(store.get('assignments', 'g2')), 1);
+  store.put('assignments', { ...store.get('assignments', 'g1'), color: 4 });
+  assert.equal(store.programColor(store.get('assignments', 'g1')), 4);
+  assert.equal(store.freeColor('a', '2026-11-09'), 0);
+});
+
+test('two programs at once each keep their own days, and the coach sees each one done', () => {
+  store.clearAll();
+  store.put('blocks', blockOf('p1', 'Lift'));
+  store.put('blocks', blockOf('p2', 'Run'));
+  // Lift on Mondays, Run on Tuesdays, both from Nov 2 for 4 weeks.
+  const g1 = store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'p1', startDate: '2026-11-02', weekdays: [0], color: 0 });
+  const g2 = store.put('assignments', { id: 'g2', athleteId: 'a', blockId: 'p2', startDate: '2026-11-02', weekdays: [1], color: 1 });
+  assert.equal(store.plannedOn('a', '2026-11-09')[0].block.id, 'p1');
+  assert.equal(store.plannedOn('a', '2026-11-10')[0].block.id, 'p2');
+  const done = (iso) => { const l = store.startLog('a', iso, store.plannedOn('a', iso)[0]); l.entries[0].sets[0].done = true; l.finished = true; store.saveLog(l); };
+  done('2026-11-02'); done('2026-11-09'); done('2026-11-03');
+  assert.deepEqual(store.programProgress(g1, '2026-11-11'), { done: 2, due: 2, total: 4, last: '2026-11-09' });
+  assert.deepEqual(store.programProgress(g2, '2026-11-11'), { done: 1, due: 2, total: 4, last: '2026-11-03' });
+  assert.deepEqual(store.logProgram(store.logFor('a', '2026-11-03')), { name: 'Run', color: 1, assignmentId: 'g2' });
+  // A removed program's old workouts still say which program they were.
+  store.del('assignments', 'g2');
+  assert.equal(store.logProgram(store.logFor('a', '2026-11-03')).name, 'Run');
+});
