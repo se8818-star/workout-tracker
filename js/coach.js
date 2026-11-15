@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, sectionStarts, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
@@ -602,7 +602,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0, open = true) {
   const iu = item.unit || store.unit();
   const loadedEx = store.all('exercises').filter((e) => e.loaded).sort((a, b) => a.name.localeCompare(b.name));
   // Less-used settings stay folded away unless one is already in use.
-  const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group;
+  const extrasOpen = item.rpe != null || prog.type !== 'none' || item.group || item.section;
   const off = !item.warmup && b && offInWeek(item, week);
   const sum = off ? `Left out of week ${week + 1}` : itemSummary(item, b, wk);
   return `<div class="item ${off ? 'item-off' : ''} ${open ? '' : 'folded'}" data-di="${di}" data-ii="${ii}" ${open ? '' : 'data-action="itemToggle"'}>
@@ -641,7 +641,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0, open = true) {
       <label>Tempo<input type="text" placeholder="e.g. 3-1-1-0" value="${esc(item.tempo || '')}" data-action="itemField" data-k="tempo"></label>
       <label>Notes<textarea class="item-note" rows="2" placeholder="Cues, rest, setup… the athlete sees this" data-action="itemField" data-k="note">${esc(item.note || '')}</textarea></label>
     </div>
-    <details class="item-extra" ${extrasOpen ? 'open' : ''}><summary>RPE, weekly progression, superset</summary>
+    <details class="item-extra" ${extrasOpen ? 'open' : ''}><summary>RPE, weekly progression, superset, section</summary>
       <div class="item-fields">
         <label>RPE<input type="number" step="0.5" min="1" max="10" value="${item.rpe ?? ''}" data-action="itemField" data-k="rpe"></label>
         <label>Each week<select data-action="progType">
@@ -652,6 +652,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0, open = true) {
           ${measure === 'time' ? `<option value="add_secs" ${prog.type === 'add_secs' ? 'selected' : ''}>+ seconds</option>` : ''}</select></label>
         ${prog.type !== 'none' ? `<label>By<input type="number" step="0.5" value="${(prog.type === 'add_weight' ? store.showW(prog.step, iu) : prog.step) ?? ''}" data-action="progStep"></label>` : ''}
         <label>Superset<input type="text" maxlength="2" value="${esc(item.group || '')}" placeholder="A" data-action="itemField" data-k="group"></label>
+        <label>Section<input type="text" maxlength="40" value="${esc(item.section || '')}" placeholder="e.g. Foam roll" data-action="itemField" data-k="section"></label>
       </div>
     </details>
     </div>
@@ -736,7 +737,10 @@ export function blockEditor(root, { id }, query) {
   const onIt = onBlock(id);
   const usedBy = onIt.length ? `<details class="assigned-note small who-sum"><summary>${onIt.length} athlete${onIt.length === 1 ? '' : 's'} on this ${isWarmup(b) ? 'warmup' : 'program'}</summary><p class="who">${whoLine(onIt)}</p><p class="muted">Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Change workouts on their page.</p></details>` : '';
   const isOpen = (di, ii) => openItems.has(`${id}:${di}:${ii}`);
-  const warmItems = (d, di) => d.items.map((it, ii) => (it.warmup ? itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`, null, 0, isOpen(di, ii)) : '')).join('');
+  // A heading above each named section (item.section) in either list.
+  const secOf = (d, warm) => { const list = d.items.filter((x) => !x.warmup === !warm); const st = sectionStarts(list); return (it) => st[list.indexOf(it)]; };
+  const secH = (name) => (name ? `<h5 class="sec-sub">${esc(name)}</h5>` : '');
+  const warmItems = (d, di) => { const sec = secOf(d, true); return d.items.map((it, ii) => (it.warmup ? secH(sec(it)) + itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`, null, 0, isOpen(di, ii)) : '')).join(''); };
   const dayCard = (di) => {
     const d = b.days[di];
     return `
@@ -761,7 +765,7 @@ export function blockEditor(root, { id }, query) {
         </div>
         <div class="sec">
           <h4>Workout</h4>
-          ${d.items.map((it, ii) => (it.warmup ? '' : itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length), b, week, isOpen(di, ii)))).join('')}
+          ${((sec) => d.items.map((it, ii) => (it.warmup ? '' : secH(sec(it)) + itemRow(it, di, ii, ex, it.group || String(d.items.slice(0, ii + 1).filter((x) => !x.warmup).length), b, week, isOpen(di, ii)))).join(''))(secOf(d, false))}
         </div>
         <button class="btn ghost wide add-ex" data-action="itemAdd" data-di="${di}">+ Add exercise</button>
         <details class="quick-wrap"><summary>Or type a list</summary>
@@ -892,7 +896,7 @@ export function blockEditor(root, { id }, query) {
         markOwn(el, it);
         return save(false);
       }
-      if (['note', 'tempo', 'group', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
+      if (['note', 'tempo', 'group', 'section', 'maxFrom'].includes(k)) it[k] = el.value.trim() || undefined;
       else if (k === 'weight') it[k] = store.readW(num(el.value), it.unit);
       else it[k] = num(el.value);
       save(false);
