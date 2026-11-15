@@ -349,6 +349,15 @@ button.last b { color: var(--track); white-space: nowrap; font-weight: 650; }
 }
 .vid-chip:active { opacity: 0.8; }
 .vids { margin-top: 8px; }
+/* per-set RPE the athlete noted */
+.set-rpe { padding: 0 0 4px 30px; }
+.rpe-chip {
+  font: 700 0.8rem var(--body); color: var(--ink); background: var(--fill); border: 0; border-radius: 99px;
+  padding: 5px 11px; min-height: 30px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.rpe-chip small { font-weight: 600; color: var(--muted); margin-left: 4px; }
+.rpe-sets { flex-wrap: wrap; }
+.rpe-sets small { color: var(--muted); font-weight: 600; margin-left: 3px; }
 .form-video { width: 100%; max-height: 70vh; background: #000; display: block; border-radius: 12px; }
 /* exercise demo videos */
 .demo-chip {
