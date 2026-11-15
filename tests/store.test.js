@@ -165,3 +165,30 @@ test('two programs at once each keep their own days, and the coach sees each one
   store.del('assignments', 'g2');
   assert.equal(store.logProgram(store.logFor('a', '2026-11-03')).name, 'Run');
 });
+
+test("an athlete's logging choice carries to later weeks, not past ones or other athletes", () => {
+  store.clearAll();
+  store.put('exercises', { id: 'sq', name: 'Squat', loaded: false });
+  store.put('athletes', { id: 'a', name: 'A', maxes: {} });
+  store.put('athletes', { id: 'b', name: 'B', maxes: {} });
+  store.put('blocks', blockOf('blk', 'Blk'));
+  store.put('assignments', { id: 'g1', athleteId: 'a', blockId: 'blk', startDate: '2026-10-19', weekdays: [0] });
+  store.put('assignments', { id: 'g2', athleteId: 'b', blockId: 'blk', startDate: '2026-10-19', weekdays: [0] });
+  // Week 1 is done with reps only.
+  const wk1 = store.startLog('a', '2026-10-19', store.plannedOn('a', '2026-10-19')[0]);
+  wk1.entries[0].sets[0].done = true; wk1.finished = true; store.saveLog(wk1);
+  // Week 2 is already open (untouched) when the athlete switches to weight and reps elsewhere.
+  store.startLog('a', '2026-10-26', store.plannedOn('a', '2026-10-26')[0]);
+  store.setLogAs('a', 'sq', { measure: 'reps', load: true });
+  assert.equal(store.currentLog('a', '2026-10-26').entries[0].load, true);
+  assert.equal(store.startLog('a', '2026-11-02', store.plannedOn('a', '2026-11-02')[0]).entries[0].load, true);
+  assert.equal(store.previewEntries('a', '2026-11-09', store.plannedOn('a', '2026-11-09')[0])[0].load, true);
+  assert.equal(store.logFor('a', '2026-10-19').entries[0].load, undefined);
+  assert.equal(store.startLog('b', '2026-10-26', store.plannedOn('b', '2026-10-26')[0]).entries[0].load, undefined);
+  assert.equal(store.get('exercises', 'sq').loaded, false);
+  // Changing it again wins; going back to the usual way drops the extra.
+  store.setLogAs('a', 'sq', { measure: 'time', load: false });
+  const e = store.currentLog('a', '2026-11-02').entries[0];
+  assert.equal(e.measure, 'time');
+  assert.equal(e.load, undefined);
+});

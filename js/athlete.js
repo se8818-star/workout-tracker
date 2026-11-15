@@ -476,7 +476,7 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
           const b = ev.target.closest('[data-m]'); if (!b) return;
           closeSheet();
           const fake = { dataset: { i: String(i) } };
-          ({ editEntry: () => editEntrySheet(e, () => { persist(); rerender(); }), swap: () => swapSheet(log, i, () => { persist(); rerender(); }),
+          ({ editEntry: () => editEntrySheet(log, e, () => { persist(); rerender(); }), swap: () => swapSheet(log, i, () => { persist(); rerender(); }),
             history: () => historySheet(log, e), removeSet: () => { e.sets.pop(); e.setsChanged = true; persist(); rerender(); } })[b.dataset.m](fake);
         });
       });
@@ -503,7 +503,7 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
       return wrap;
     },
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
-    editEntry: (el) => editEntrySheet(log.entries[el.dataset.i], () => { persist(); rerender(); }),
+    editEntry: (el) => editEntrySheet(log, log.entries[el.dataset.i], () => { persist(); rerender(); }),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addVideo: (el) => {
       if (!videosEnabled()) return toast('Videos need the online app, not the demo.');
@@ -629,18 +629,21 @@ function historySheet(log, entry) {
 }
 
 // Change how one exercise is logged in this workout: reps, time, breaths or a
-// plain check-off, and whether it gets a weight box. It only changes this
-// day's log; the coach's program and the exercise library stay as they are.
+// plain check-off, and whether it gets a weight box. With "Keep this" ticked
+// (the default) it's also remembered for this athlete and exercise, so later
+// workouts log it the same way (store.setLogAs). The coach's program, the
+// exercise library, other athletes and past workouts stay as they are.
 const LOG_AS = [['reps', 'Reps'], ['time', 'Time'], ['breaths', 'Breaths'], ['none', 'Check off']];
-function editEntrySheet(entry, done) {
+function editEntrySheet(log, entry, done) {
   const ex = store.get('exercises', entry.exerciseId);
   let m = entry.measure || 'reps';
   let weight = logsWeight({ ...entry, measure: 'reps' }, ex);
-  const html = `<p class="muted">Only changes this workout. Your coach's program stays the same.</p>
+  const html = `<p class="muted">Your coach's program and past workouts stay the same.</p>
     <p class="sheet-label">Log it as</p>
     <div class="seg" role="group" aria-label="Log it as">${LOG_AS.map(([v, label]) =>
       `<button class="${m === v ? 'on' : ''}" data-m="${v}" aria-pressed="${m === v}">${label}</button>`).join('')}</div>
     <label class="check-row edit-weight"><input type="checkbox" ${weight ? 'checked' : ''}> Log the weight I use</label>
+    <label class="check-row edit-keep"><input type="checkbox" checked> Keep this for ${esc(ex?.name || 'this exercise')} in future workouts</label>
     <div class="ask-btns"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-save>Save</button></div>`;
   sheet(ex?.name || 'Edit exercise', html, (w) => {
     const box = w.querySelector('.edit-weight');
@@ -658,6 +661,7 @@ function editEntrySheet(entry, done) {
       if (m === 'reps') delete entry.measure; else entry.measure = m;
       if (weight === (ex?.loaded !== false)) delete entry.load; else entry.load = weight;
       entry.athleteEdited = true;
+      if (w.querySelector('.edit-keep input').checked) store.setLogAs(log.athleteId, entry.exerciseId, { measure: m, load: weight });
       const open = entry.sets.filter((s) => !s.done);
       if (!logsWeight(entry, ex)) open.forEach((s) => { s.weight = null; });
       // A check-off is one tap, so extra empty sets go.

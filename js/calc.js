@@ -373,6 +373,27 @@ export function sessionEntries(s, unit) {
   })) }));
 }
 
+// How an athlete chose to log an exercise from now on (athlete.logAs, keyed by
+// exercise id: { measure, load }). Fresh entries from the program take it on,
+// so later weeks and other programs log that exercise the same way until the
+// athlete changes it again. Only that athlete's workouts change; the coach's
+// program and the library stay as they are.
+export function applyLogAs(entries, logAs, exercises = {}) {
+  if (!logAs) return entries;
+  return entries.map((e) => {
+    const p = logAs[e.exerciseId];
+    if (!p) return e;
+    const out = { ...e };
+    if (p.measure === 'reps') delete out.measure; else if (p.measure) out.measure = p.measure;
+    if (typeof p.load === 'boolean') {
+      if (p.load === (exercises[e.exerciseId]?.loaded !== false)) delete out.load; else out.load = p.load;
+    }
+    // A check-off is one tap, so the program's extra sets fold into one.
+    if (out.measure === 'none' && out.sets.length > 1) out.sets = out.sets.slice(0, 1);
+    return out;
+  });
+}
+
 // A set with a form video counts as touched, so a rebuild never drops the clip.
 const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit && !s.video;
 export const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
@@ -398,6 +419,7 @@ export function refreshEntries(entries, fresh) {
       ...e, note: f.note, tempo: f.tempo, group: f.group, unit: f.unit, basedOn: f.basedOn,
       // How the athlete chose to log it (reps, breaths, weight...) stays theirs.
       measure: e.athleteEdited ? e.measure : f.measure,
+      load: e.athleteEdited ? e.load : f.load,
       sets: e.sets.map((s, j) => {
         const t = f.sets[Math.min(j, f.sets.length - 1)];
         if (!t || s.done) return s;

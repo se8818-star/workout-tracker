@@ -330,3 +330,17 @@ test('nextOpenEntry: next unfinished exercise after the one just finished', asyn
   // empty exercises are passed over, nothing left = null
   assert.equal(nextOpenEntry([E([true]), E([]), E([true])], 0), null);
 });
+
+test('a saved logging choice reaches touched entries the athlete did not edit', () => {
+  const fresh = calc.applyLogAs([{ exerciseId: 'sq', sets: [{ targetReps: 5 }, { targetReps: 5 }] }], { sq: { measure: 'none', load: false } }, { sq: { loaded: true } });
+  assert.equal(fresh[0].measure, 'none');
+  assert.equal(fresh[0].load, false);
+  assert.equal(fresh[0].sets.length, 1);
+  const touched = [{ exerciseId: 'sq', athleteNote: 'sore', sets: [{ targetReps: 5 }, { targetReps: 5 }] }];
+  const out = calc.refreshEntries(touched, fresh);
+  assert.equal(out[0].measure, 'none');
+  assert.equal(out[0].load, false);
+  const edited = calc.refreshEntries([{ ...touched[0], athleteEdited: true, measure: 'time' }], fresh);
+  assert.equal(edited[0].measure, 'time');
+  assert.equal(edited[0].load, undefined);
+});
