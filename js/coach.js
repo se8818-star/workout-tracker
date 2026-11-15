@@ -183,10 +183,10 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
       }).join('') || '<p class="muted">Nothing logged yet.</p>';
   const views = {
     overview: `
-      <section class="card"><div class="row between wk-head"><div><h3 style="margin:0">${wkTitle}</h3><span class="muted small">${shown.sessionsDone} of ${shown.sessionsPlanned} · ${fmt(store.showW(shown.done.tonnage))} ${u}</span></div>
+      <section class="card wk-card"><div class="row between wk-head"><div><h3 style="margin:0">${wkTitle}</h3><span class="muted small">${shown.sessionsDone} of ${shown.sessionsPlanned} · ${fmt(store.showW(shown.done.tonnage))} ${u}</span></div>
           <span class="week-nav">${wkMon === thisMon ? '' : `<a class="chip small" href="${wkHref(thisMon)}">This week</a>`}<a class="icon-btn" href="${wkHref(addDays(wkMon, -7))}" aria-label="Previous week">‹</a><a class="icon-btn" href="${wkHref(addDays(wkMon, 7))}" aria-label="Next week">›</a></span></div>
         <div class="date-strip" style="margin:8px -6px 0">${days}</div>
-        <p class="muted small peek-hint">Tap a day to see it the way ${esc(a.name.split(' ')[0])} does.</p></section>
+        <p class="muted small peek-hint">Tap a day to see it the way ${esc(a.name.split(' ')[0])} does. Swipe to change weeks.</p></section>
       <section class="card">${current.length ? byCategory(current) : '<p class="muted">No program running right now.</p>'}
         <a class="link" href="#/coach/assign?athlete=${id}">+ Assign a program or warmup</a></section>
       <div class="list-head"><span>Recent sessions</span><a href="#/coach/athlete/${id}?tab=log">See all</a></div>
@@ -244,6 +244,46 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
   };
   bindActions(root, handlers);
   peekDays(root, id);
+  swipeWeeks(root.querySelector('.wk-card'), wkHref(addDays(wkMon, -7)), wkHref(addDays(wkMon, 7)));
+}
+
+// Phones: swipe the week card left for the next week, right for the one
+// before. The days follow the finger, then snap back if the swipe was short.
+function swipeWeeks(card, prevHref, nextHref) {
+  const strip = card?.querySelector('.date-strip');
+  if (!strip) return;
+  let x0 = null, y0 = 0, dx = 0, horiz = null;
+  card.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; horiz = null;
+    strip.style.transition = 'none';
+  }, { passive: true });
+  card.addEventListener('touchmove', (e) => {
+    if (x0 == null) return;
+    dx = e.touches[0].clientX - x0;
+    const dy = e.touches[0].clientY - y0;
+    if (horiz == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) horiz = Math.abs(dx) > Math.abs(dy);
+    if (!horiz) return;
+    e.preventDefault();
+    strip.style.transform = `translateX(${dx * 0.6}px)`;
+    strip.style.opacity = String(Math.max(0.35, 1 - Math.abs(dx) / 400));
+  }, { passive: false });
+  const end = () => {
+    if (x0 == null) return;
+    x0 = null;
+    if (horiz && Math.abs(dx) > 60) {
+      strip.style.transition = 'transform 0.15s ease-out, opacity 0.15s';
+      strip.style.transform = `translateX(${dx < 0 ? -120 : 120}px)`; strip.style.opacity = '0';
+      setTimeout(() => { location.hash = dx < 0 ? nextHref : prevHref; }, 120);
+      return;
+    }
+    strip.style.transition = 'transform 0.2s ease-out, opacity 0.2s';
+    strip.style.transform = ''; strip.style.opacity = '';
+  };
+  card.addEventListener('touchend', end);
+  card.addEventListener('touchcancel', end);
+  // A swipe that ends on a day isn't a tap on it.
+  card.addEventListener('click', (e) => { if (horiz && Math.abs(dx) > 8) { e.preventDefault(); e.stopPropagation(); horiz = null; } }, true);
 }
 
 // Hover pop-over for the coach's week strip: what the athlete's Today page
