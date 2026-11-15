@@ -4,7 +4,7 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
-import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, untouchedLog, assignmentStatus, daysBetween, addDays, loggedWork, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
+import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, applyLogAs, untouchedLog, assignmentStatus, daysBetween, addDays, loggedWork, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
@@ -440,6 +440,19 @@ const keepLog = (log) => (ownsLogs() ? put('logs', log) : log);
 // was copied from), so weekly rules build on their actual sets.
 const lastDone = (athleteId, block, dayIndex, week, beforeIso) => lastDoneFrom(logsFor(athleteId), block, dayIndex, week, beforeIso);
 
+// A built session as log entries, with the athlete's saved logging choices.
+const entriesFor = (s, athlete) => applyLogAs(sessionEntries(s, unit()), athlete?.logAs, db.exercises);
+
+// Remember how an athlete logs an exercise from now on (see applyLogAs).
+// choice = { measure, load }; null forgets it.
+export function setLogAs(athleteId, exerciseId, choice) {
+  const a = get('athletes', athleteId);
+  if (!a) return;
+  const logAs = { ...(a.logAs || {}) };
+  if (choice) logAs[exerciseId] = choice; else delete logAs[exerciseId];
+  put('athletes', { ...a, logAs });
+}
+
 // Start (or reopen) a log for a planned session.
 export function startLog(athleteId, iso, plan) {
   const cat = categoryOf(plan.block);
@@ -451,25 +464,27 @@ export function startLog(athleteId, iso, plan) {
     id: logId(athleteId, iso, cat), athleteId, date: iso, ...(cat === 'strength' ? {} : { category: cat }),
     assignmentId: plan.assignment.id, blockId: plan.block.id, week: plan.week, dayIndex: plan.dayIndex,
     name: s.name,
-    entries: sessionEntries(s, unit()),
+    entries: entriesFor(s, athlete),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }
 
 // What a planned day would hold if opened now, without saving a log (Today's preview).
 export function previewEntries(athleteId, iso, plan) {
-  const s = buildSession(plan.block, plan.dayIndex, plan.week, get('athletes', athleteId), roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
-  return s ? sessionEntries(s, unit()) : [];
+  const athlete = get('athletes', athleteId);
+  const s = buildSession(plan.block, plan.dayIndex, plan.week, athlete, roundStep(), lastDone(athleteId, plan.block, plan.dayIndex, plan.week, iso));
+  return s ? entriesFor(s, athlete) : [];
 }
 
 export function startWarmupLog(athleteId, iso, w) {
   const existing = warmupLogFor(athleteId, iso);
   if (existing && existing.blockId === w.block.id) return existing;
-  const s = buildSession(w.block, 0, 0, get('athletes', athleteId), roundStep());
+  const athlete = get('athletes', athleteId);
+  const s = buildSession(w.block, 0, 0, athlete, roundStep());
   return keepLog({
     id: `${athleteId}:${iso}:warmup`, athleteId, date: iso, warmup: true,
     assignmentId: w.assignment.id, blockId: w.block.id, week: 0, dayIndex: 0, name: w.block.name,
-    entries: sessionEntries(s, unit()),
+    entries: entriesFor(s, athlete),
     sessionRpe: null, minutes: null, note: '', finished: false,
   });
 }
@@ -484,10 +499,11 @@ export function refreshLog(log) {
   const copy = asg && asg.blockId !== log.blockId && get('blocks', asg.blockId);
   const block = copy?.copiedFrom === log.blockId ? copy : get('blocks', log.blockId);
   if (!block) return log;
-  const s = buildSession(block, log.dayIndex, log.week, get('athletes', log.athleteId), roundStep(),
+  const athlete = get('athletes', log.athleteId);
+  const s = buildSession(block, log.dayIndex, log.week, athlete, roundStep(),
     log.warmup ? null : lastDone(log.athleteId, block, log.dayIndex, log.week, log.date));
   if (!s) return log;
-  const entries = refreshEntries(log.entries, sessionEntries(s, unit()));
+  const entries = refreshEntries(log.entries, entriesFor(s, athlete));
   const name = log.warmup ? log.name : s.name;
   if (name === log.name && block.id === log.blockId && JSON.stringify(entries) === JSON.stringify(log.entries)) return log;
   return keepLog({ ...log, name, entries, blockId: block.id });
