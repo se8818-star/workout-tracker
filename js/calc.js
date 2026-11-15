@@ -353,6 +353,7 @@ export function buildSession(block, dayIndex, week, athlete, rounding = 5, lastD
         note: item.note || '',
         tempo: item.tempo || '',
         group: item.group || '',
+        ...(item.section ? { section: item.section } : {}),
         ...(actual ? { basedOn: done.week } : {}),
         sets: Array.from({ length: n }, (_, j) => {
           const a = actual?.[j] || {};
@@ -415,9 +416,9 @@ export function refreshEntries(entries, fresh) {
     if (k < 0) return untouchedEntry(e) ? null : e;
     used.add(k);
     const f = fresh[k];
-    if (untouchedEntry(e)) return { ...e, basedOn: undefined, ...f };
+    if (untouchedEntry(e)) return { ...e, basedOn: undefined, section: undefined, ...f };
     return {
-      ...e, note: f.note, tempo: f.tempo, group: f.group, unit: f.unit, basedOn: f.basedOn,
+      ...e, note: f.note, tempo: f.tempo, group: f.group, section: f.section, unit: f.unit, basedOn: f.basedOn,
       // How the athlete chose to log it (reps, breaths, weight...) stays theirs.
       measure: e.athleteEdited ? e.measure : f.measure,
       load: e.athleteEdited ? e.load : f.load,
@@ -646,3 +647,7 @@ export function nextOpenEntry(entries, i) {
   }
   return order.find((k) => left(entries[k])) ?? null;
 }
+
+// Section headings (item.section, e.g. "Foam roll" in a warmup): a heading
+// goes above the first item of each run of items sharing a section.
+export const sectionStarts = (items) => items.map((e, i) => (e.section && e.section !== items[i - 1]?.section ? e.section : ''));

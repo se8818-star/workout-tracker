@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, loggedWork, untouchedLog, plannedRpe, RPE_STEPS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, sectionStarts, loggedWork, untouchedLog, plannedRpe, RPE_STEPS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
@@ -69,7 +69,11 @@ function orderLabels(entries) {
   const seen = {};
   let n = 0;
   let w = 0;
-  return entries.map((e) => {
+  let k = 0;
+  return entries.map((e, i) => {
+    // Items in a named section are numbered within it (the heading names it).
+    if (e.section) k = e.section === entries[i - 1]?.section ? k + 1 : 1;
+    if (e.section && (e.warmup || !e.group)) { if (!e.warmup) n++; return String(k); }
     if (e.warmup) return `W${++w}`;
     if (!e.group) return String(++n);
     seen[e.group] = (seen[e.group] || 0) + 1;
@@ -327,12 +331,12 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
     <p class="kicker">${warm ? 'Before your workout' : block ? (() => { const pg = store.logProgram(log); return progTag(pg.name, pg.color, log.week); })() : ''}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
     ${!warm && isCoach(id) && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
     <div style="height:10px"></div>
-    ${warm ? log.entries.map((e, i) => entryCard(log, e, i, labels[i], folds[i])).join('') : log.entries.map((e, i) => {
+    ${sectioned(log.entries, warm ? (e, i) => entryCard(log, e, i, labels[i], folds[i]) : (e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
       const head = e.warmup && !log.entries[i - 1]?.warmup ? '<h2 class="sec-head warm-head">Warmup</h2>'
         : !e.warmup && log.entries[i - 1]?.warmup ? '<h2 class="sec-head">Workout</h2>' : '';
       return head + entryCard(log, e, i, labels[i], folds[i]);
-    }).join('')}
+    })}
     <button class="btn ghost wide" data-action="addExercise">+ Add an exercise</button>
     ${log.finished ? finishedCard(log, warm)
       : `${log.note || log.sessionRpe ? `<p class="muted small" style="margin-top:14px">${sessionSummary(log)}</p>` : ''}
@@ -941,4 +945,28 @@ export function history(root, { id }) {
         }).join('')}</div>`).join('');
     })() : '<p class="empty"><b>No sessions yet</b>Finished workouts show up here.</p>'}`;
   bindActions(root, { pickMax: (el) => { pickMax(el); history(root, { id }); } });
+}
+// Cards in a named section (entry.section) sit together in a tinted panel
+// with its own colour and a heading with the count; sections cycle through
+// four colours so neighbours always differ. `card(e, i)` draws one entry,
+// and may put a "Warmup"/"Workout" heading in front of it, which belongs
+// outside the panel.
+function sectioned(entries, card) {
+  const starts = sectionStarts(entries);
+  let out = '', open = false, n = 0;
+  entries.forEach((e, i) => {
+    let html = card(e, i);
+    const lead = html.startsWith('<h2') ? html.slice(0, html.indexOf('</h2>') + 5) : '';
+    html = html.slice(lead.length);
+    if (open && (starts[i] || !e.section)) { out += '</section>'; open = false; }
+    out += lead;
+    if (starts[i]) {
+      let count = 0;
+      for (let j = i; j < entries.length && entries[j].section === e.section && (j === i || !starts[j]); j++) count++;
+      out += `<section class="sec-group sec-c${n++ % 4}"><h3 class="sec-sub"><span>${esc(e.section)}</span><small>${count}</small></h3>`;
+      open = true;
+    }
+    out += html;
+  });
+  return out + (open ? '</section>' : '');
 }
