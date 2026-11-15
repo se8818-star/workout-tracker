@@ -9,7 +9,7 @@ import { pickExerciseSheet, videoSheet, maxPicker, pickMax, sessionHref, dayCard
 import { TEMPLATES } from './templates.js';
 import { planLibraryImport } from './libimport.js';
 import { parseProgression, describeRules, applyProgression, clearWeeks } from './progression.js';
-import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled } from './sync.js';
+import { removeAthleteLogin, removeVideos, videoFresh, hasLogin, cloudEnabled, coachAccess, accessLoaded, setCoachAccess } from './sync.js';
 
 const today = () => toISO(new Date());
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -20,9 +20,12 @@ export function board(root, _p, query) {
   const mon = weekStart(query.get('d') || today());
   const isNow = mon === weekStart(today());
   const show = query.get('show') || '';
-  const groups = [...new Set(store.all('athletes').map((a) => a.group).filter(Boolean))].sort();
+  // A helper coach sees only the athletes they were given.
+  const mine = store.coachedAthletes();
+  const head = store.isHeadCoach();
+  const groups = [...new Set(mine.map((a) => a.group).filter(Boolean))].sort();
   const group = query.get('g') || '';
-  const athletes = store.all('athletes').filter((a) => !group || a.group === group);
+  const athletes = mine.filter((a) => !group || a.group === group);
   const u = store.unit();
   const t = today();
   let team = { tonnage: 0, contacts: 0, done: 0, planned: 0 };
@@ -71,7 +74,7 @@ export function board(root, _p, query) {
       : `<div class="attention">${tile('missed', 'Missed', counts.missed, true)}<div><span class="stat-label">Sessions</span><b>${team.done}<small class="muted" style="font-size:0.9rem"> / ${team.planned}</small></b></div><div><span class="stat-label">Athletes</span><b>${athletes.length}</b></div></div>`}
     <div class="list-head" style="margin-top:18px"><span>${filtered.length} athlete${filtered.length === 1 ? '' : 's'}${show ? ` · <a href="${q({ show: '' })}">show all</a>` : ''}</span>
       ${groups.length > 1 ? `<select data-action="group" aria-label="Group" style="width:auto;min-height:34px;padding:4px 10px"><option value="">All groups</option>${groups.map((g) => `<option ${g === group ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>` : ''}</div>
-    ${filtered.length ? `<div class="list">${filtered.map((p) => p.html).join('')}</div>` : `<p class="empty">${athletes.length ? 'Nobody here right now.' : '<b>No athletes yet</b>Tap + to add one, or share the team code from More.'}</p>`}
+    ${filtered.length ? `<div class="list">${filtered.map((p) => p.html).join('')}</div>` : `<p class="empty">${athletes.length ? 'Nobody here right now.' : head ? '<b>No athletes yet</b>Tap + to add one, or share the team code from More.' : '<b>No athletes yet</b>Your head coach hasn\'t given you anyone to coach.'}</p>`}
     <div class="card team-totals"><div><span class="stat-label">Sessions</span><b>${team.done} / ${team.planned}</b></div><div><span class="stat-label">Volume</span><b>${fmt(store.showW(team.tonnage))} ${u}</b></div><div style="text-align:right"><span class="stat-label">Plyo contacts</span><b>${fmt(team.contacts)}</b></div></div>`;
   const addAthlete = async () => {
     const f = await askFields('Add athlete', [{ k: 'name', label: 'Name' }, { k: 'group', label: 'Group', placeholder: 'e.g. Pitchers' }], { ok: 'Add athlete' });
@@ -83,7 +86,7 @@ export function board(root, _p, query) {
   bindActions(root, {
     group: (el) => { location.hash = q({ g: el.value }); },
     plus: () => {
-      sheet('Add', `<ul class="menu-list"><li><a href="#/coach/assign">Assign a program</a></li><li><button data-m="athlete">Add an athlete</button></li><li><button data-m="block">New program</button></li></ul>`, (w) => {
+      sheet('Add', `<ul class="menu-list"><li><a href="#/coach/assign">Assign a program</a></li>${head ? '<li><button data-m="athlete">Add an athlete</button></li>' : '<li><a href="#/coach/blocks">My programs</a></li>'}<li><button data-m="block">New program</button></li></ul>`, (w) => {
         w.addEventListener('click', (ev) => {
           const b = ev.target.closest('[data-m]'); if (!b) return;
           closeSheet();
@@ -114,6 +117,12 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
   const asg = store.assignmentsFor(id);
   const tab = ['overview', 'program', 'maxes', 'log'].includes(query.get('tab')) ? query.get('tab') : 'overview';
   const initials = a.name.split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+  // Head coach: who this athlete may coach, and who may coach them.
+  const headCloud = store.isHeadCoach() && cloudEnabled && accessLoaded();
+  const names = (ids) => ids.map((x) => store.get('athletes', x)?.name).filter(Boolean).join(', ');
+  const coachesWho = headCloud ? names(coachAccess()[id] || []) : '';
+  const coachedBy = headCloud ? names(Object.entries(coachAccess()).filter(([, ids]) => ids.includes(id)).map(([c]) => c)) : '';
+  const accessLine = coachesWho || coachedBy ? `<p class="access-line small">${coachesWho ? `<span>Also coaches <b>${esc(coachesWho)}</b> <button class="link" data-action="access">Change</button></span>` : ''}${coachedBy ? `<span>Also coached by <b>${esc(coachedBy)}</b></span>` : ''}</p>` : '';
   const asgs = asg.map((g) => ({ g, b: store.get('blocks', g.blockId) })).map((x) => ({ ...x, s: x.b ? asgState(x.g, x.b) : { st: 'ended', txt: 'Program deleted' } }))
     .sort((x, y) => ORDER[x.s.st] - ORDER[y.s.st]);
   const asgCard = ({ g, b, s }) => {
@@ -180,16 +189,19 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
       <section class="card">${logHtml(logs)}</section>`,
   };
   root.innerHTML = `
-    <header class="page-head"><div class="row between"><a class="back" href="#/coach">Team</a><button class="more-btn" data-action="menu" aria-label="More">•••</button></div>
+    <header class="page-head"><div class="row between"><a class="back" href="#/coach">${store.isHeadCoach() ? 'Team' : 'Coach'}</a><button class="more-btn" data-action="menu" aria-label="More">•••</button></div>
       <div class="row gap" style="gap:12px;margin-top:4px"><span class="avatar big">${esc(initials)}</span><div style="min-width:0"><h1 style="font-size:1.9rem">${esc(a.name)}</h1>
-        <p class="muted small">${esc([a.group, [...new Set(current.filter((x) => x.b && !isWarmup(x.b)).flatMap((x) => x.g.weekdays || []))].sort().map((d) => WEEKDAYS[d]).join(', ')].filter(Boolean).join(' · trains '))}</p></div></div></header>
+        <p class="muted small">${esc([a.group, [...new Set(current.filter((x) => x.b && !isWarmup(x.b)).flatMap((x) => x.g.weekdays || []))].sort().map((d) => WEEKDAYS[d]).join(', ')].filter(Boolean).join(' · trains '))}</p></div></div>
+      ${accessLine}</header>
     <nav class="tabs-seg" aria-label="Sections">${[['overview', 'Overview'], ['program', 'Program'], ['maxes', 'Maxes'], ['log', 'Log']].map(([k, label]) => `<a href="#/coach/athlete/${id}${k === 'overview' ? '' : `?tab=${k}`}" class="${tab === k ? 'on' : ''}">${label}</a>`).join('')}</nav>
     ${views[tab]}`;
   const handlers = {
-    menu: () => sheet(a.name, `<ul class="menu-list"><li><a href="#/athlete/${id}">Open athlete view</a></li><li><a href="#/athlete/${id}/week">Weekly numbers</a></li><li><a href="#/coach/assign?athlete=${id}">Assign a program</a></li></ul>
-      <div class="menu-gap"></div><ul class="menu-list"><li><button class="danger" data-m="remove">Remove from team</button></li></ul>
-      <p class="muted small" style="margin-top:10px">Removing cuts off ${esc(a.name.split(' ')[0])}'s access and deletes their programs, logs and notes.</p>`, (wr) => {
-      wr.querySelector('[data-m="remove"]').addEventListener('click', () => { closeSheet(); handlers.removeAthlete(); });
+    menu: () => sheet(a.name, `<ul class="menu-list"><li><a href="#/athlete/${id}">Open athlete view</a></li><li><a href="#/athlete/${id}/week">Weekly numbers</a></li><li><a href="#/coach/assign?athlete=${id}">Assign a program</a></li>
+      ${headCloud ? `<li><button data-m="access">Let ${esc(a.name.split(' ')[0])} coach other athletes</button></li>` : ''}</ul>
+      ${store.isHeadCoach() ? `<div class="menu-gap"></div><ul class="menu-list"><li><button class="danger" data-m="remove">Remove from team</button></li></ul>
+      <p class="muted small" style="margin-top:10px">Removing cuts off ${esc(a.name.split(' ')[0])}'s access and deletes their programs, logs and notes.</p>` : ''}`, (wr) => {
+      wr.querySelector('[data-m="remove"]')?.addEventListener('click', () => { closeSheet(); handlers.removeAthlete(); });
+      wr.querySelector('[data-m="access"]')?.addEventListener('click', () => { closeSheet(); coachAccessSheet(id, () => athlete(root, { id }, query)); });
     }),
     removeAthlete: async () => {
       if (!await ask(`${a.name} loses access right away. Their programs, logs and notes are deleted too. This can't be undone.`, { title: `Remove ${a.name}?`, ok: 'Remove from team', danger: true })) return;
@@ -202,6 +214,7 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
       location.hash = '#/coach';
     },
     playVideo: (el) => videoSheet(el.dataset.path),
+    access: () => coachAccessSheet(id, () => athlete(root, { id }, query)),
     setMax: (el) => {
       const k = el.dataset.ex;
       // A removed max isn't estimated again from the lifts already logged,
@@ -291,7 +304,10 @@ function onBlock(blockId) {
 const whoLine = (list) => `<span class="who-list">${list.map(({ a, s }) => `<span class="who-item"><a href="#/coach/athlete/${a.id}">${esc(a.name)}</a> ${stateTag(s)}</span>`).join('')}</span>`;
 
 export function blocks(root) {
-  const all = store.all('blocks').sort((a, b) => a.name.localeCompare(b.name));
+  // A helper coach lists the programs they made; the head coach's programs
+  // are still there to assign (Assign) and to copy for an athlete.
+  const head = store.isHeadCoach();
+  const all = store.all('blocks').filter((b) => head || store.canEditBlock(b)).sort((a, b) => a.name.localeCompare(b.name));
   // Who's on it, as one line: "4 athletes · 4 active now". Tap to see each person.
   const whoSum = (who) => {
     if (!who.length) return '<span class="who-sum">Not assigned to anyone</span>';
@@ -309,7 +325,7 @@ export function blocks(root) {
         <button class="chip" data-action="useTemplate" data-id="${t.id}">Add</button></li>`;
   root.innerHTML = `
     <header class="page-head"><div class="head-row"><h1>Programs</h1><button class="round-btn" data-action="new" aria-label="New program">+</button></div>
-      <p class="muted">Build a program once, then assign it to anyone.</p></header>
+      <p class="muted">${head ? 'Build a program once, then assign it to anyone.' : 'Programs you made. The head coach\'s programs can be assigned from Assign, and changed for one athlete with Change workouts on their page.'}</p></header>
     ${all.filter((b) => !isWarmup(b)).map((b) => row(b, `${store.categoryLabel(store.categoryOf(b))} · ${b.weeks} weeks · ${b.days.length} days a week${b.deloadWeek != null ? ` · deload week ${b.deloadWeek + 1}` : ''}`)).join('') || '<p class="empty"><b>No programs yet</b>Tap + or start from a template below.</p>'}
     <div class="list-head" style="margin-top:26px"><span>Warmups</span><button class="link" data-action="newWarmup">+ New warmup</button></div>
     <p class="muted small" style="margin:0 4px 10px">Assign a warmup and it shows above the athlete's workout. You can also load one into a program day.</p>
@@ -550,7 +566,7 @@ function itemRow(item, di, ii, ex, label, b = null, week = 0, open = true) {
     ${off ? `<p class="wk-note small"><b>Left out of week ${week + 1}.</b> <button class="link" data-action="weekReset">Put back</button></p>` : ''}
     <div class="item-measure"><div class="seg" role="group" aria-label="Measure by">${MEASURES.map(([v, label]) =>
       `<button class="${measure === v ? 'on' : ''}" data-action="measure" data-v="${v}" aria-pressed="${measure === v}">${label}</button>`).join('')}</div>
-      ${x ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps, demo video">Edit exercise ✎</a>` : ''}
+      ${x && store.isHeadCoach() ? `<a class="link small" href="#/coach/exercises?edit=${x.id}&back=${encodeURIComponent(location.hash)}" title="Weight, how it's usually logged, swaps, demo video">Edit exercise ✎</a>` : ''}
       ${x?.video ? `<button class="link small" ${demoAttrs(x)}>▶ Demo</button>` : ''}</div>
     ${measure === 'none' ? '<p class="muted small item-none">No sets or reps. The athlete just checks it off.</p>' : `<div class="item-main">
       ${stepper('Sets', 'sets', nums.sets, 1, 1, nums.own.sets)}
@@ -616,9 +632,32 @@ function plannedDayTotals(block, di, week) {
   return sessionTotals(s, ex, false);
 }
 
+// A helper coach opening one of the head coach's programs: they can't edit
+// it for everyone, so point them at their athletes' own copies.
+function readOnlyBlock(root, b) {
+  const mine = store.all('assignments').filter((g) => g.blockId === b.id && store.canCoach(g.athleteId))
+    .map((g) => ({ g, a: store.get('athletes', g.athleteId) })).filter((x) => x.a);
+  root.innerHTML = `
+    <header class="page-head"><a class="back" href="#/coach/blocks">Programs</a><h1>${esc(b.name)}</h1></header>
+    <section class="card"><p>This is the head coach's program, so only they can change it for everyone.</p>
+      ${mine.length ? `<p class="muted small">To change it for one athlete, open their copy. Your first change makes them their own copy, and the head coach's program stays as it is.</p>
+        <div class="row gap wrap">${mine.map(({ g, a }) => `<a class="btn" href="#/coach/assignment/${g.id}/plan">Change ${esc(a.name.split(' ')[0])}'s workouts</a>`).join('')}</div>`
+        : `<p class="muted small">You can still assign it, or make your own copy to change.</p>`}
+      <div class="row gap wrap" style="margin-top:12px"><a class="btn ghost" href="#/coach/assign?block=${b.id}">Assign</a><button class="btn ghost" data-action="dup">Make my own copy</button></div></section>`;
+  bindActions(root, {
+    dup: () => {
+      const c = structuredClone(b);
+      c.id = store.uid('block'); c.name = `${b.name} (copy)`; c.copiedFrom = b.id;
+      store.put('blocks', c);
+      location.hash = `#/coach/block/${c.id}`;
+    },
+  });
+}
+
 export function blockEditor(root, { id }, query) {
   const b = store.get('blocks', id);
   if (!b) { root.innerHTML = '<p class="empty">Block not found.</p>'; return; }
+  if (!store.canEditBlock(b)) { readOnlyBlock(root, b); return; }
   const ex = store.exercisesById();
   const week = Math.min(Number(query.get('w') || 0), b.weeks - 1);
   const totals = () => {
@@ -987,7 +1026,7 @@ export function blockEditor(root, { id }, query) {
 export function assign(root, _p, query) {
   const all = store.all('blocks').sort((x, y) => x.name.localeCompare(y.name));
   const programs = all.filter((b) => !isWarmup(b)), warmups = all.filter(isWarmup);
-  const athletes = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
+  const athletes = store.coachedAthletes().sort((a, b) => a.name.localeCompare(b.name));
   const groups = [...new Set(athletes.map((a) => a.group).filter(Boolean))];
   const pre = query.get('athlete');
   const blockId = query.get('block') || programs[0]?.id || warmups[0]?.id;
@@ -1248,6 +1287,7 @@ export function assignmentEditor(root, { id }) {
   const warm = isWarmup(b);
   const others = [...new Set(store.all('assignments').filter((x) => x.blockId === b.id && x.athleteId !== a.id).map((x) => store.get('athletes', x.athleteId)?.name).filter(Boolean))];
   const first = a.name.split(' ')[0];
+  const editable = store.canEditBlock(b);
   root.innerHTML = `
     <header class="page-head"><a class="back" href="#/coach/athlete/${a.id}">‹ ${esc(a.name)}</a>
       <span class="kicker">${warm ? 'Warmup' : 'Program'} for ${esc(a.name)}</span><h1>${esc(b.name)}</h1></header>
@@ -1264,8 +1304,8 @@ export function assignmentEditor(root, { id }) {
     <section class="card"><h3>Exercises, sets and reps</h3>
       ${warm ? '' : `<p class="muted small">Change ${esc(first)}'s exercises, sets and reps week by week, for just one week or the rest of the program.${others.length ? ` Only ${esc(first)} gets the changes.` : ''}</p>
         <a class="btn" href="#/coach/assignment/${g.id}/plan">Change ${esc(first)}'s workouts</a><hr class="plan-sep">`}
-      ${others.length ? `<p class="muted small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this ${warm ? 'warmup' : 'program'} too. Editing it changes it for everyone. Make a copy to change it just for ${esc(first)}.</p>
-        <div class="row gap wrap"><button class="btn" data-action="copy">Make a copy just for ${esc(first)}</button><a class="btn ghost" href="#/coach/block/${b.id}">Edit for everyone</a></div>`
+      ${others.length || !editable ? `<p class="muted small">${others.length ? `${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this ${warm ? 'warmup' : 'program'} too. Editing it changes it for everyone.` : `This is the head coach's ${warm ? 'warmup' : 'program'}.`} Make a copy to change it just for ${esc(first)}.</p>
+        <div class="row gap wrap"><button class="btn" data-action="copy">Make a copy just for ${esc(first)}</button>${editable ? `<a class="btn ghost" href="#/coach/block/${b.id}">Edit for everyone</a>` : ''}</div>`
         : `<p class="muted small">Changes reach ${esc(first)}'s days that haven't been started. Finished workouts stay as logged.</p><a class="btn" href="#/coach/block/${b.id}">Edit ${warm ? 'warmup' : 'program'}</a>`}
     </section>`;
   bindActions(root, {
@@ -1306,7 +1346,8 @@ function weekNow(g, b) {
 // The block to change for this athlete. When others are on the same program
 // they keep the original: this athlete gets their own copy first.
 function ownBlock(g, b, a) {
-  const shared = store.all('assignments').some((x) => x.blockId === b.id && x.id !== g.id);
+  // A helper coach always works on a copy of the head coach's programs.
+  const shared = !store.canEditBlock(b) || store.all('assignments').some((x) => x.blockId === b.id && x.id !== g.id);
   if (!shared) return b;
   const c = structuredClone(b);
   c.id = store.uid('block'); c.name = `${b.name} (${a.name.split(' ')[0]})`; c.copiedFrom = b.id;
@@ -1342,7 +1383,8 @@ export function assignmentPlan(root, { id }, query) {
     <header class="page-head"><a class="back" href="#/coach/athlete/${a.id}">‹ ${esc(a.name)}</a>
       <span class="kicker">${esc(first)}'s program</span><h1>${esc(b.name)}</h1>
       <p class="muted small">Change exercises, sets and reps right here. After each change you pick: just this week, or this week to the end. Workouts ${esc(first)} already finished stay as logged.</p></header>
-    ${others.length ? `<p class="assigned-note small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this program too. Your first change makes a copy just for ${esc(first)}, so they keep theirs.</p>` : ''}
+    ${others.length ? `<p class="assigned-note small">${esc(others.join(', '))} ${others.length > 1 ? 'are' : 'is'} on this program too. Your first change makes a copy just for ${esc(first)}, so they keep theirs.</p>`
+      : !store.canEditBlock(b) ? `<p class="assigned-note small">This is the head coach's program. Your first change makes a copy just for ${esc(first)}, so theirs stays as it is.</p>` : ''}
     <nav class="day-tabs week-tabs" aria-label="Weeks">
       ${Array.from({ length: b.weeks }, (_, w) => `<button class="day-tab ${w === week ? 'on' : ''} ${w === now ? 'now' : ''}" data-action="pickWeek" data-w="${w}" aria-pressed="${w === week}">Wk ${w + 1}${b.deloadWeek === w ? ' · D' : ''}</button>`).join('')}
     </nav>
@@ -1480,4 +1522,29 @@ function changeSheet(item, v, okLabel, done, state = null) {
     });
   });
   wrap.classList.add('ask');
+}
+
+// ---------- helper coaches ----------
+
+// Head coach: pick the athletes `coachId` (an athlete with their own login)
+// may coach too. They then see those athletes' pages, programs, logs, maxes
+// and form videos, and can assign and change their programs. The database
+// enforces it (supabase/coach-access.sql). Calls done() after saving.
+export function coachAccessSheet(coachId, done) {
+  const c = store.get('athletes', coachId);
+  if (!c) return;
+  const first = c.name.split(' ')[0];
+  const have = new Set(coachAccess()[coachId] || []);
+  const list = store.all('athletes').filter((a) => a.id !== coachId).sort((x, y) => x.name.localeCompare(y.name));
+  const wrap = sheet(`What ${first} can coach`, `<p class="muted small">${esc(first)} keeps their own workouts and gets a Coach tab for the athletes you tick: their programs, workouts, maxes and form videos. ${esc(first)} can assign and change their programs, but can't see anyone else or change your programs for everyone (changing one makes that athlete a copy).</p>
+    ${hasLogin(coachId) === false ? `<p class="small warn-text">${esc(first)} hasn't signed up yet. This starts working once they do.</p>` : ''}
+    <div class="checks">${list.map((a) => `<label class="check-row"><input type="checkbox" name="ca" value="${a.id}" ${have.has(a.id) ? 'checked' : ''}> ${esc(a.name)} <small class="muted">${esc(a.group || '')}</small></label>`).join('')}</div>
+    <div class="ask-btns"><button class="btn ghost" data-close>Cancel</button><button class="btn" data-save>Save</button></div>`);
+  wrap.querySelector('[data-save]').addEventListener('click', async () => {
+    const ids = [...wrap.querySelectorAll('input[name=ca]:checked')].map((x) => x.value);
+    try { await setCoachAccess(coachId, ids); } catch (e) { toast(/coach_access/.test(e.message || '') ? 'Run the coach access SQL in Supabase first.' : `Couldn't save: ${e.message}`); return; }
+    closeSheet();
+    toast(ids.length ? `${first} can now coach ${ids.length === 1 ? store.get('athletes', ids[0])?.name : `${ids.length} athletes`}` : `${first} no longer coaches anyone`);
+    done?.();
+  });
 }

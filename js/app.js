@@ -3,8 +3,8 @@
 import * as store from './store.js';
 import * as athleteViews from './athlete.js';
 import * as coachViews from './coach.js';
-import { esc, bindActions, toast, ask, styledSelects, demoLinks, closeSheet } from './ui.js';
-import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword } from './sync.js';
+import { esc, bindActions, toast, ask, sheet, styledSelects, demoLinks, closeSheet } from './ui.js';
+import { startSync, gate, cloudEnabled, teamInfo, signout, setPassword, coachAccess, accessLoaded } from './sync.js';
 
 await store.load({ cloud: cloudEnabled });
 
@@ -63,7 +63,9 @@ function nav(path) {
   let items = [];
   if (m?.role === 'athlete') {
     const id = m.athleteId;
-    items = [[`#/athlete/${id}`, 'Today', ICONS.today], [`#/athlete/${id}/week`, 'Progress', ICONS.progress], [`#/athlete/${id}/history`, 'History', ICONS.history], ['#/settings', 'More', ICONS.more]];
+    items = [[`#/athlete/${id}`, 'Today', ICONS.today], [`#/athlete/${id}/week`, 'Progress', ICONS.progress], [`#/athlete/${id}/history`, 'History', ICONS.history],
+      // An athlete the head coach lets coach others gets a Coach tab too.
+      ...(store.isHelperCoach() ? [['#/coach', 'Coach', ICONS.team]] : []), ['#/settings', 'More', ICONS.more]];
   } else if (m?.role === 'coach') {
     items = [['#/coach', 'Team', ICONS.team], ['#/coach/blocks', 'Programs', ICONS.programs], ['#/coach/exercises', 'Exercises', ICONS.exercises], ['#/settings', 'More', ICONS.more]];
   }
@@ -95,9 +97,10 @@ function render(keepScroll = false) {
   if (cloudEnabled && path === '/') { const m = me(); location.hash = m.role === 'coach' ? '#/coach' : `#/athlete/${m.athleteId}`; return; }
   if (!me() && path !== '/') { location.hash = '#/'; return; }
   // Athletes only see their own pages: no coach screens, no other athletes.
+  // A helper coach also gets the coach screens for the athletes they coach.
   const m = me();
   const other = path.match(/^\/athlete\/([^/]+)/);
-  if (m?.role === 'athlete' && (path.startsWith('/coach') || (other && other[1] !== m.athleteId))) { location.hash = `#/athlete/${m.athleteId}`; return; }
+  if (m?.role === 'athlete' && ((path.startsWith('/coach') && !helperMayOpen(path)) || (other && other[1] !== m.athleteId && !store.canCoach(other[1])))) { location.hash = `#/athlete/${m.athleteId}`; return; }
   for (const [re, view, keys = []] of routes) {
     const m = path.match(re);
     if (!m) continue;
@@ -108,6 +111,19 @@ function render(keepScroll = false) {
     return;
   }
   root.innerHTML = '<p class="empty">Page not found. <a href="#/">Home</a></p>';
+}
+
+// The coach screens a helper coach may open: the team list (just their
+// athletes), programs, assigning, and the pages of athletes they coach.
+// Not the exercise library, which stays the head coach's.
+function helperMayOpen(path) {
+  if (!store.isHelperCoach()) return false;
+  if (['/coach', '/coach/blocks', '/coach/assign'].includes(path) || /^\/coach\/block\/[^/]+$/.test(path)) return true;
+  const ath = path.match(/^\/coach\/athlete\/([^/]+)$/);
+  if (ath) return store.canCoach(decodeURIComponent(ath[1]));
+  const asg = path.match(/^\/coach\/assignment\/([^/]+)(\/plan)?$/);
+  if (asg) return store.canCoach(store.get('assignments', decodeURIComponent(asg[1]))?.athleteId);
+  return false;
 }
 
 function home(root) {
@@ -130,11 +146,32 @@ function home(root) {
   });
 }
 
+// More page: athletes the head coach lets coach others ("Cole coaches Landon").
+function helpersCard() {
+  if (cloudEnabled && store.isHeadCoach() && accessLoaded()) {
+    const name = (id) => store.get('athletes', id)?.name;
+    const rows = Object.entries(coachAccess()).filter(([c]) => name(c))
+      .map(([c, ids]) => `<li><span class="grow"><span class="name">${esc(name(c))}</span><br><span class="sub">coaches ${esc(ids.map(name).filter(Boolean).join(', ') || 'nobody')}</span></span><button class="chip" data-action="helperEdit" data-id="${esc(c)}">Change</button></li>`).join('');
+    return `<section class="card"><h3>Athletes who also coach</h3>
+      <p class="muted small">Let an athlete coach chosen teammates: they get a Coach tab with just those athletes, and can assign and change their programs.</p>
+      ${rows ? `<ul class="list">${rows}</ul>` : ''}
+      <button class="btn ghost wide" data-action="helperAdd">Let an athlete coach others</button></section>`;
+  }
+  if (store.isHelperCoach()) {
+    const list = me().coaches.map((id) => store.get('athletes', id)).filter(Boolean);
+    return `<section class="card"><h3>You also coach</h3>
+      ${list.length ? `<ul class="list">${list.map((a) => `<li><a href="#/coach/athlete/${a.id}"><span class="grow"><span class="name">${esc(a.name)}</span></span><span class="chev"></span></a></li>`).join('')}</ul>` : '<p class="muted small">Loading…</p>'}
+      <p class="muted small">Your head coach picked these athletes for you. Find them under the Coach tab.</p></section>`;
+  }
+  return '';
+}
+
 function settingsView(root) {
   const s = store.settings();
   root.innerHTML = `
     <header class="page-head"><h1>More</h1></header>
     ${me()?.role === 'coach' ? `<section class="card">${teamInfo() ? `<p>Team <b>${esc(teamInfo().team?.name)}</b>. Athletes join with code <b class="code">${esc(teamInfo().team?.join_code)}</b></p>` : ''}<a class="btn wide" href="#/coach/assign">Assign a program</a></section>` : ''}
+    ${helpersCard()}
     <section class="card form">
       <label class="field-row"><span>Appearance</span><select data-action="theme" aria-label="Appearance">${[['light', 'Light'], ['dark', 'Dark'], ['auto', 'Match my phone']].map(([v, l]) => `<option value="${v}" ${theme() === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field-row"><span>Units</span><select data-action="units"><option ${s.units === 'lb' ? 'selected' : ''}>lb</option><option ${s.units === 'kg' ? 'selected' : ''}>kg</option></select></label>
@@ -155,6 +192,19 @@ function settingsView(root) {
       ${cloudEnabled ? '' : '<button class="btn ghost wide danger" data-action="reset">Reset demo data</button>'}
     </section>`;
   bindActions(root, {
+    helperEdit: (el) => coachViews.coachAccessSheet(el.dataset.id, () => settingsView(root)),
+    helperAdd: () => {
+      const list = store.all('athletes').sort((a, b) => a.name.localeCompare(b.name));
+      if (!list.length) return toast('No athletes yet');
+      const wrap = sheet('Who should coach?', `<p class="muted small">Pick the athlete. Next you choose who they can coach.</p>
+        <ul class="pick">${list.map((a) => `<li><button data-id="${esc(a.id)}">${esc(a.name)} <small>${esc(a.group || '')}</small></button></li>`).join('')}</ul>`);
+      wrap.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-id]');
+        if (!b) return;
+        closeSheet();
+        coachViews.coachAccessSheet(b.dataset.id, () => settingsView(root));
+      });
+    },
     theme: (el) => setTheme(el.value),
     units: (el) => { store.setSetting('units', el.value); settingsView(root); },
     rounding: (el) => store.setSetting(s.units === 'kg' ? 'roundingKg' : 'rounding', Number(el.value) || 0),
