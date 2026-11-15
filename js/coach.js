@@ -738,8 +738,8 @@ export function blockEditor(root, { id }, query) {
   const usedBy = onIt.length ? `<details class="assigned-note small who-sum"><summary>${onIt.length} athlete${onIt.length === 1 ? '' : 's'} on this ${isWarmup(b) ? 'warmup' : 'program'}</summary><p class="who">${whoLine(onIt)}</p><p class="muted">Edits reach their days that haven't been started. Finished workouts stay as logged. To change it for one person, use Change workouts on their page.</p></details>` : '';
   const isOpen = (di, ii) => openItems.has(`${id}:${di}:${ii}`);
   // A heading above each named section (item.section) in either list.
-  const secOf = (d, warm) => { const list = d.items.filter((x) => !x.warmup === !warm); const st = sectionStarts(list); return (it) => st[list.indexOf(it)]; };
-  const secH = (name) => (name ? `<h5 class="sec-sub">${esc(name)}</h5>` : '');
+  const secOf = (d, warm) => { const list = d.items.filter((x) => !x.warmup === !warm); const st = sectionStarts(list); let n = 0; const c = st.map((x) => (x ? n++ % 4 : null)); return (it) => { const k = list.indexOf(it); return st[k] ? { name: st[k], c: c[k] } : null; }; };
+  const secH = (s) => (s ? `<h5 class="sec-sub sec-c${s.c}"><span>${esc(s.name)}</span></h5>` : '');
   const warmItems = (d, di) => { const sec = secOf(d, true); return d.items.map((it, ii) => (it.warmup ? secH(sec(it)) + itemRow(it, di, ii, ex, `W${d.items.slice(0, ii + 1).filter((x) => x.warmup).length}`, null, 0, isOpen(di, ii)) : '')).join(''); };
   const dayCard = (di) => {
     const d = b.days[di];
