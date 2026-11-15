@@ -883,3 +883,10 @@ a.day:hover { text-decoration: none; }
 /* Head coach: "Also coaches Landon" under an athlete's name. */
 .access-line { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; color: var(--muted, inherit); }
 .access-line .link { margin-left: 4px; }
+
+/* coach athlete page: week card steps through weeks; warmup days get an amber dot */
+.wk-head { align-items: flex-start; gap: 8px; }
+.wk-head .week-nav .chip { min-height: 32px; padding: 4px 12px; font-size: 0.82rem; margin-right: 2px; }
+.day-dots { display: flex; gap: 3px; min-height: 6px; align-items: center; }
+.day i.wdot { width: 6px; height: 6px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--hi); }
+.day i.wdot.done { background: var(--hi); box-shadow: none; }
