@@ -65,8 +65,8 @@ test('Landon Program: 3 days of plyos, supersets and weekly weight rules, no war
   assert.equal(squat.sets.length, 4);
   assert.equal(squat.sets[0].reps, 5);
   assert.equal(squat.sets[0].repsTo, 8);
-  assert.equal(squat.sets[0].weight, 215);
-  assert.equal(buildSession(t.block, 2, 2, { maxes: {} }).items.find((x) => x.exerciseId === 'ssb-box-squat').sets[0].weight, 225);
+  assert.equal(squat.sets[0].weight, 255);
+  assert.equal(buildSession(t.block, 2, 2, { maxes: {} }).items.find((x) => x.exerciseId === 'ssb-box-squat').sets[0].weight, 265);
   const mon = buildSession(t.block, 0, 0, { maxes: {} });
   assert.equal(mon.items.find((x) => x.exerciseId === 'a-march').sets.length, 1, 'yard drills are check-offs');
   assert.equal(mon.items.find((x) => x.exerciseId === '3pt-y-raise').sets[0].secs, 30);

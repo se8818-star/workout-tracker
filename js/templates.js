@@ -184,8 +184,8 @@ const CHRISTINA_FB_BLOCK = {
 // Fourth sheet (Landon): three days (Monday full body, Friday upper, Saturday
 // lower) for 4 weeks, each starting with plyos/sprints and ending with a
 // breathing cool-down. Lifts with "+5-10 lbs" add 5 lb a week from what the
-// athlete actually lifted; starting weights are the sheet's (its "start with"
-// note, else what Landon wrote in week 1). Distances (yards) have no box in the
+// athlete actually lifted; starting weights are the last (heaviest) weight
+// Landon logged on the sheet. Distances (yards) have no box in the
 // app, so those drills are check-offs with the distance in the note.
 // Vimeo demos that need a password carry it on the exercise.
 const L = (id, name, pattern, body, loaded, video, videoPassword) => ({ ...X(id, name, pattern, body, loaded, video), ...(videoPassword ? { videoPassword } : {}) });
@@ -301,7 +301,7 @@ const LANDON_BLOCK = {
         li('alt-db-incline-press', 2, 6, { group: 'B', weight: 40, step: 5, note: `${EACH} ${ADD_5_10}\nPut two 45 lb plates where your feet go. Back flat on the bench, core braced so your hips stay tucked. Video it or FaceTime Sean and he'll help.` }),
         li('chin-up', 2, null, { group: 'B', note: 'Max reps. 2 seconds lowering.' }),
         li('prone-swimmer-hover', 2, null, { group: 'B', note: 'Watch the video.' }),
-        li('db-pullover', 2, 8, { group: 'C', weight: 20, note: 'Start with 20 lb.' }),
+        li('db-pullover', 2, 8, { group: 'C', weight: 25 }),
         li('bottoms-up-kb-carry', 2, null, { group: 'C', weight: 20, note: 'Walk 15 yards with a 15-20 lb KB. Keep the elbow up, especially as you get tired.' }),
         li('side-plank-reach-rotate', 2, null, { group: 'C', measure: 'time', note: 'Max time.' }),
         li('dead-hang', 2, null, { group: 'C', measure: 'time', note: 'Max time. Keep your hips tucked under you. Try to PR every single time.' }),
@@ -314,14 +314,14 @@ const LANDON_BLOCK = {
     {
       name: 'Saturday: Lower',
       items: [
-        li('ssb-box-squat', 4, 5, { range: '5-8', group: 'A', weight: 215, step: 5, note: `${ADD_5_10} Only sets above 210 count, so don't start too heavy.\nIf your gym has wedges, use those. Otherwise a 3-second lowering, then explode up.` }),
+        li('ssb-box-squat', 4, 5, { range: '5-8', group: 'A', weight: 255, step: 5, note: `${ADD_5_10} Only sets above 210 count, so don't start too heavy.\nIf your gym has wedges, use those. Otherwise a 3-second lowering, then explode up.` }),
         li('approach-jump', 4, 4, { group: 'A', note: 'As high as possible.' }),
-        li('contra-b-stance-rdl', 3, 6, { range: '6-8', group: 'B', weight: 55, step: 5, note: `${EACH} ${ADD_5_10}\nStart with 55 lb. Back straight, weight centered over your foot. When you run out of range at your hip, come up. Do NOT round your back.` }),
+        li('contra-b-stance-rdl', 3, 6, { range: '6-8', group: 'B', weight: 50, step: 5, note: `${EACH} ${ADD_5_10}\nBack straight, weight centered over your foot. When you run out of range at your hip, come up. Do NOT round your back.` }),
         li('broad-jump', 3, 5, { group: 'B', note: 'Mark your distance with a cone or band and try to beat it every time.' }),
-        li('quad-extension', 3, 8, { range: '8-12', group: 'C', weight: 140, step: 5, note: "Add 5 lb from last time. Lock out every rep. If you can't do another rep, you didn't do it correctly." }),
+        li('quad-extension', 3, 8, { range: '8-12', group: 'C', weight: 150, step: 5, note: "Add 5 lb from last time. Lock out every rep. If you can't do another rep, you didn't do it correctly." }),
         li('seated-leg-curl', 3, 8, { range: '8-12', group: 'C', weight: 80, step: 5, note: 'Add 5 lb from last time. Full range of motion.' }),
-        li('overhead-pallof-press', 3, 8, { group: 'D', weight: 25, step: 5, note: `${EACH} Add 5 lb from last time. Use a cable, start with 25 lb.` }),
-        li('goblet-lateral-lunge-iso', 3, null, { group: 'D', measure: 'time', weight: 45, step: 5, note: 'Max time. Add 5 lb from last time; start with 45 lb. Hold at the bottom with your back straight, both feet pointed forward and the out-leg knee straight.' }),
+        li('overhead-pallof-press', 3, 8, { group: 'D', weight: 25, step: 5, note: `${EACH} Add 5 lb from last time. Use a cable.` }),
+        li('goblet-lateral-lunge-iso', 3, null, { group: 'D', measure: 'time', weight: 45, step: 5, note: 'Max time. Add 5 lb from last time. Hold at the bottom with your back straight, both feet pointed forward and the out-leg knee straight.' }),
         li('leg-press-calf-raise', 2, 8, { range: '8-12', group: 'E', weight: 180, note: 'Hold the stretch for 1 second.' }),
         li('plate-pinch-walk', 2, null, { group: 'E', measure: 'time', weight: 25, note: 'Max time. Pinch a 25 lb plate in each hand and walk.' }),
         li('assault-bike', 1, null, { measure: 'time', secs: 300, note: '5-10 minutes, easy. You should be able to hold a conversation.' }),
