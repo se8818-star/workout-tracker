@@ -339,7 +339,7 @@ export function blocks(root) {
       for (const e of t.exercises) {
         const have = store.get('exercises', e.id);
         if (!have) store.put('exercises', structuredClone(e));
-        else if (e.video && !have.video) store.put('exercises', { ...have, video: e.video });
+        else if (e.video && !have.video) store.put('exercises', { ...have, video: e.video, ...(e.videoPassword ? { videoPassword: e.videoPassword } : {}) });
       }
       const nb = { ...structuredClone(t.block), id: store.uid('block'), name: f.name };
       if (!warmT) { if (f.category && f.category !== 'strength') nb.category = f.category; else delete nb.category; }
