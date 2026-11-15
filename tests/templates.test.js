@@ -53,3 +53,38 @@ test('Christina FB is three supersets with demo videos on its exercises', () => 
   assert.equal(t.exercises.find((e) => e.id === 'db-bench').video, 'https://youtu.be/JN9DVjlafcg');
   assert.equal(s.items[2].sets[0].rpe, null);
 });
+
+test('Landon Program: 3 days of plyos, supersets and weekly weight rules, no warmup inside', () => {
+  const t = TEMPLATES.find((x) => x.id === 'landon');
+  assert.equal(t.name, 'Landon Program');
+  assert.equal(t.block.weeks, 4);
+  assert.deepEqual(t.block.days.map((d) => d.name), ['Monday: Full body', 'Friday: Upper', 'Saturday: Lower']);
+  assert.ok(t.block.days.every((d) => d.items.every((x) => !x.warmup)));
+  const sat = buildSession(t.block, 2, 0, { maxes: {} });
+  const squat = sat.items.find((x) => x.exerciseId === 'ssb-box-squat');
+  assert.equal(squat.sets.length, 4);
+  assert.equal(squat.sets[0].reps, 5);
+  assert.equal(squat.sets[0].repsTo, 8);
+  assert.equal(squat.sets[0].weight, 255);
+  assert.equal(buildSession(t.block, 2, 2, { maxes: {} }).items.find((x) => x.exerciseId === 'ssb-box-squat').sets[0].weight, 265);
+  const mon = buildSession(t.block, 0, 0, { maxes: {} });
+  assert.equal(mon.items.find((x) => x.exerciseId === 'a-march').sets.length, 1, 'yard drills are check-offs');
+  assert.equal(mon.items.find((x) => x.exerciseId === '3pt-y-raise').sets[0].secs, 30);
+  const ex = Object.fromEntries(t.exercises.map((e) => [e.id, e]));
+  assert.equal(ex['dead-hang'].videoPassword, 'cressey');
+  for (const d of t.block.days) for (const x of d.items) assert.doesNotMatch(x.note || '', /password|https?:/i);
+});
+
+test('Landon Warmup is its own warmup template', () => {
+  const t = TEMPLATES.find((x) => x.id === 'landon-warmup');
+  assert.equal(t.kind, 'warmup');
+  assert.equal(t.name, 'Landon Warmup');
+  const items = t.block.days[0].items;
+  assert.equal(items.length, 15);
+  assert.ok(items.every((x) => x.warmup));
+  assert.equal(items.find((x) => x.exerciseId === 'bretzel').measure, 'breaths');
+});
+
+test('template exercise ids are unique within each template', () => {
+  for (const t of TEMPLATES) assert.equal(new Set(t.exercises.map((e) => e.id)).size, t.exercises.length, t.id);
+});
