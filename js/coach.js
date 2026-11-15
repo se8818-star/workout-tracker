@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, sectionStarts, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, rpeLine, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, sectionStarts, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
@@ -170,6 +170,7 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
         const t = sessionTotals(l, ex, true);
         const swaps = l.entries.filter((e) => e.swappedFrom).map((e) => `${ex[e.swappedFrom]?.name} → ${ex[e.exerciseId]?.name}`);
         const notes = l.entries.filter((e) => e.athleteNote).map((e) => `${ex[e.exerciseId]?.name}: ${e.athleteNote}`);
+        const rpes = l.entries.map((e) => { const r = rpeLine(e); return r ? `${ex[e.exerciseId]?.name}: ${r}` : ''; }).filter(Boolean);
         const vids = l.entries.flatMap((e) => e.sets.map((s, j) => (videoFresh(s.video) ? `<button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ ${esc(ex[e.exerciseId]?.name || '')} · set ${j + 1}</button>` : ''))).join('');
         const pg = store.logProgram(l);
         return `<div class="log-item"><div class="row between"><span><a class="log-open" href="${sessionHref(l)}">${esc(l.name)}</a>${l.warmup ? ' <small class="tag-warm">Warmup</small>' : ''}${l.finished ? '' : ' <small class="muted">not finished</small>'}</span><span class="muted small">${fmtDate(l.date)}</span></div>
@@ -177,6 +178,7 @@ export function athlete(root, { id }, query = new URLSearchParams()) {
           <p class="muted small">Effort ${l.sessionRpe ?? '–'} · ${l.minutes ?? '–'} min · ${fmt(store.showW(t.tonnage))} ${u}${t.contacts ? ` · ${fmt(t.contacts)} contacts` : ''}${l.switchedFrom ? ' · switched day' : ''}</p>
           ${l.note ? `<p class="note">“${esc(l.note)}”</p>` : ''}
           ${notes.map((n) => `<p class="note small">${esc(n)}</p>`).join('')}
+          ${rpes.length ? `<p class="small muted">${esc(rpes.join(' · '))}</p>` : ''}
           ${swaps.length ? `<p class="small muted">Swaps: ${esc(swaps.join(', '))}</p>` : ''}
           ${(l.maxFlags || []).map((f) => `<p class="small warn-text">Check: ${esc(ex[f.exerciseId]?.name || '')} suggests a max of ${fmt(store.showW(f.est))} ${u}. Not saved; change it on the Maxes tab if it's real.</p>`).join('')}
           ${vids ? `<div class="row gap wrap vids">${vids}</div>` : ''}</div>`;

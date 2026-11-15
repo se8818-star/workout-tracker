@@ -396,7 +396,8 @@ export function applyLogAs(entries, logAs, exercises = {}) {
 }
 
 // A set with a form video counts as touched, so a rebuild never drops the clip.
-const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit && !s.video;
+// An RPE the athlete noted counts too.
+const untouchedSet = (s) => !s.done && s.reps == null && s.secs == null && s.weight == null && !s.unit && !s.video && s.actualRpe == null;
 export const untouchedEntry = (e) => !e.addedByAthlete && !e.athleteEdited && !e.swappedFrom && !e.athleteNote && !e.setsChanged && e.sets.every(untouchedSet);
 
 // A day's log is made the first time the athlete opens it, but the coach can
@@ -484,6 +485,28 @@ export function addTotals(a, b) {
 
 export function emptyTotals() {
   return sessionTotals({ items: [] }, {});
+}
+
+// RPE per set: set.rpe is the coach's planned RPE (from the program),
+// set.actualRpe what the athlete says it really felt like (optional).
+export const RPE_STEPS = [5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
+
+// The planned RPE for an exercise in a workout, when its sets share one.
+export function plannedRpe(entry) {
+  const vals = [...new Set((entry.sets || []).map((s) => s.rpe).filter((v) => v != null))];
+  return vals.length === 1 ? vals[0] : null;
+}
+
+// One line for the coach: "RPE 7, –, 8 (planned 8)", or '' when the athlete
+// noted none. A dash is a set without an RPE.
+export function rpeLine(entry) {
+  const sets = entry.sets || [];
+  if (!sets.some((s) => s.actualRpe != null)) return '';
+  let last = sets.length - 1;
+  while (last > 0 && sets[last].actualRpe == null) last--;
+  const vals = sets.slice(0, last + 1).map((s) => (s.actualRpe != null ? String(s.actualRpe) : '–'));
+  const plan = plannedRpe(entry);
+  return `RPE ${vals.join(', ')}${plan != null ? ` (planned ${plan})` : ''}`;
 }
 
 // Session load = session RPE (1-10) x minutes.

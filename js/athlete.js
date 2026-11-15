@@ -1,7 +1,7 @@
 // Athlete screens: today, the workout page (log, notes, swaps, switch), analytics, history.
 
 import * as store from './store.js';
-import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, sectionStarts, loggedWork, untouchedLog, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, buildSession, nextOpenEntry, e1rm, estimateMaxes, applyEstimates, clearedAfter, logsWeight, repsText, weekItems, sectionStarts, loggedWork, untouchedLog, plannedRpe, RPE_STEPS, PLYO_TIERS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
@@ -234,6 +234,8 @@ function entryCard(log, entry, i, label, fold = {}) {
   const cols = `${loaded ? '' : 'no-load'} ${measure === 'none' ? 'check-only' : ''}`;
   const tags = [];
   if (entry.tempo) tags.push(`Tempo ${entry.tempo}`);
+  const plan = plannedRpe(entry);
+  if (plan != null && measure !== 'none') tags.push(`Target RPE ${plan}`);
   if (entry.basedOn != null && !entry.sets.every((s) => s.done)) tags.push(`Targets build on what you did in week ${entry.basedOn + 1}`);
   if (entry.swappedFrom) tags.push(`Swapped from ${store.get('exercises', entry.swappedFrom)?.name || entry.swappedFrom}`);
   const up = fold.current ? entry.sets.findIndex((s) => !s.done) : -1;
@@ -246,7 +248,7 @@ function entryCard(log, entry, i, label, fold = {}) {
       ${box(s, j)}
       <button class="check" data-action="toggleSet" data-i="${i}" data-j="${j}" aria-pressed="${s.done}" aria-label="Mark set ${j + 1} done">✓</button>
     </div>${uploading.has(`${log.id}/${i}/${j}`) ? `<div class="set-video"><span class="muted small">Uploading set ${j + 1} video…</span></div>`
-      : videoFresh(s.video) ? `<div class="set-video"><button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ Set ${j + 1} video</button><button class="link muted-link" data-action="removeVideo" data-i="${i}" data-j="${j}">Remove</button></div>` : ''}`).join('');
+      : videoFresh(s.video) ? `<div class="set-video"><button class="vid-chip" data-action="playVideo" data-path="${esc(s.video.path)}">▶ Set ${j + 1} video</button><button class="link muted-link" data-action="removeVideo" data-i="${i}" data-j="${j}">Remove</button></div>` : ''}${s.actualRpe != null ? `<div class="set-rpe"><button class="rpe-chip" data-action="setRpe" data-i="${i}" data-j="${j}" aria-label="Set ${j + 1} felt like RPE ${s.actualRpe}. Tap to change">RPE ${s.actualRpe}${s.rpe != null && s.rpe !== s.actualRpe ? ` <small>planned ${s.rpe}</small>` : ''}</button></div>` : ''}`).join('');
   const done = entry.sets.filter((s) => s.done).length;
   return `<article class="entry ${entry.warmup ? 'warm' : ''} ${entry.sets.length && done === entry.sets.length ? 'complete' : ''} ${fold.folded ? 'folded' : ''} ${fold.current ? 'current' : ''}" id="entry-${i}">
     <header class="entry-head" data-action="toggleOpen" data-i="${i}">
@@ -266,6 +268,7 @@ function entryCard(log, entry, i, label, fold = {}) {
     <div class="entry-foot">
       ${measure === 'none' ? '' : `<button class="link" data-action="addSet" data-i="${i}">+ Set</button>`}
       <button class="link muted-link" data-action="toggleNote" data-i="${i}">${entry.athleteNote ? 'Edit note' : 'Note'}</button>
+      ${measure === 'none' ? '' : `<button class="link muted-link" data-action="setRpe" data-i="${i}">RPE</button>`}
       <button class="link muted-link" data-action="addVideo" data-i="${i}">Video</button>
     </div>
     <label class="note-field" ${entry.athleteNote ? '' : 'hidden'} id="note-${i}"><span>My note</span>
@@ -508,6 +511,7 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
       return wrap;
     },
     history: (el) => historySheet(log, log.entries[el.dataset.i]),
+    setRpe: (el) => rpeSheet(log.entries[el.dataset.i], el.dataset.j, () => { persist(); rerender(); }),
     editEntry: (el) => editEntrySheet(log, log.entries[el.dataset.i], () => { persist(); rerender(); }),
     swap: (el) => swapSheet(log, Number(el.dataset.i), () => { persist(); rerender(); }),
     addVideo: (el) => {
@@ -615,6 +619,35 @@ export function videoSheet(path) {
   });
 }
 
+// How hard a set really felt, on the RPE scale (optional). Opens on the set
+// tapped, or else on the first finished set without one. Saved as
+// set.actualRpe; the coach's planned RPE (set.rpe) stays as it is.
+function rpeSheet(entry, j, done) {
+  const sets = entry.sets;
+  if (!sets.length) return;
+  let k = j != null ? Number(j) : sets.findIndex((s) => s.done && s.actualRpe == null);
+  if (k < 0) k = Math.max(0, sets.map((s) => s.done).lastIndexOf(true));
+  const ex = store.get('exercises', entry.exerciseId);
+  const plan = plannedRpe(entry);
+  const body = () => `${sets.length > 1 ? `<p class="sheet-label">Which set?</p>
+    <div class="seg rpe-sets" role="group" aria-label="Which set">${sets.map((s, n) => `<button class="${n === k ? 'on' : ''}" data-set="${n}" aria-pressed="${n === k}">Set ${n + 1}${s.actualRpe != null ? ` <small>${s.actualRpe}</small>` : ''}</button>`).join('')}</div>` : ''}
+    <p class="muted">How hard was it? ${sets[k].rpe != null ? `Planned: <b>RPE ${sets[k].rpe}</b>.` : plan != null ? `Planned: <b>RPE ${plan}</b>.` : ''}</p>
+    <div class="rpe" role="group" aria-label="RPE">${RPE_STEPS.map((r) => `<button class="${sets[k].actualRpe === r ? 'on' : ''}" data-v="${r}">${r}</button>`).join('')}</div>
+    <p class="muted small">10 = nothing left · 9 = 1 more rep in the tank · 8 = 2 more · 7 = 3 more · 6 or less = easy</p>
+    ${sets[k].actualRpe != null ? '<button class="link muted-link" data-clear>Clear RPE for this set</button>' : ''}`;
+  sheet(`${ex?.name || 'Exercise'} · RPE`, '<div class="rpe-body"></div>', (w) => {
+    const box = w.querySelector('.rpe-body');
+    box.innerHTML = body();
+    w.addEventListener('click', (ev) => {
+      const t = ev.target.closest('[data-set]');
+      if (t) { k = Number(t.dataset.set); box.innerHTML = body(); return; }
+      const v = ev.target.closest('[data-v]');
+      if (v) { sets[k].actualRpe = Number(v.dataset.v); closeSheet(); done(); return; }
+      if (ev.target.closest('[data-clear]')) { delete sets[k].actualRpe; closeSheet(); done(); }
+    });
+  });
+}
+
 // Everything the athlete has logged for an exercise, newest first, so they
 // can pick a weight mid-workout.
 function historySheet(log, entry) {
@@ -622,7 +655,7 @@ function historySheet(log, entry) {
   const past = store.exerciseHistory(log.athleteId, entry.exerciseId, log.date);
   const u = entry.unit || store.unit();
   const amount = (s, m) => (m === 'time' ? fmtSecs(s.secs) : m === 'breaths' ? `${s.reps ?? ''} breaths` : `${s.reps ?? ''}`);
-  const setText = (s, h) => (s.weight ? `${store.showW(s.weight, s.unit || h.unit || u)} ${s.unit || h.unit || u} × ${amount(s, h.measure)}` : amount(s, h.measure) || 'Done');
+  const setText = (s, h) => `${s.weight ? `${store.showW(s.weight, s.unit || h.unit || u)} ${s.unit || h.unit || u} × ${amount(s, h.measure)}` : amount(s, h.measure) || 'Done'}${s.actualRpe != null ? ` @ RPE ${s.actualRpe}` : ''}`;
   // Heaviest set and estimated max, shown in this workout's unit.
   let best = null;
   for (const h of past) for (const s of h.sets) if (s.weight && s.reps && (!best || e1rm(s.weight, s.reps) > e1rm(best.weight, best.reps))) best = s;
