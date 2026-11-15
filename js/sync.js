@@ -74,8 +74,63 @@ async function loadMembership() {
   membership = m ? { team_id: m.team_id, role: m.role, athlete_id: m.athlete_id, team: m.teams } : null;
   store.setSetting('membership', membership);
   if (membership) {
-    store.setSetting('me', membership.role === 'coach' ? { role: 'coach' } : { role: 'athlete', athleteId: membership.athlete_id });
+    const prev = store.settings().me;
+    store.setSetting('me', membership.role === 'coach' ? { role: 'coach' }
+      : { role: 'athlete', athleteId: membership.athlete_id, userId: user.id, coaches: prev?.athleteId === membership.athlete_id ? prev.coaches || [] : [] });
+    await loadAccess();
   }
+}
+
+// ---- helper coaches ----
+// The head coach can let an athlete coach other athletes too (table
+// coach_access: { coach_athlete_id, athlete_ids }). The head coach's device
+// keeps every row, for the screens that set it; an athlete's device keeps
+// its own list in settings.me.coaches.
+let access = null;
+export const coachAccess = () => access || {};
+export const accessLoaded = () => access !== null;
+
+// Returns true when this device's view changed.
+async function loadAccess() {
+  if (!sb || !membership) return false;
+  if (membership.role === 'coach') {
+    const { data, error } = await sb.from('coach_access').select('coach_athlete_id, athlete_ids').eq('team_id', membership.team_id);
+    if (error) return false; // e.g. the SQL hasn't been run yet
+    const next = Object.fromEntries(data.filter((r) => r.athlete_ids?.length).map((r) => [r.coach_athlete_id, r.athlete_ids]));
+    const changed = JSON.stringify(next) !== JSON.stringify(access);
+    access = next;
+    return changed;
+  }
+  const { data, error } = await sb.from('coach_access').select('athlete_ids').eq('team_id', membership.team_id).eq('coach_athlete_id', membership.athlete_id);
+  if (error) return false;
+  const next = (data[0]?.athlete_ids || []).filter((x) => x !== membership.athlete_id).sort();
+  const m = store.settings().me;
+  const before = [...(m.coaches || [])].sort();
+  if (JSON.stringify(next) === JSON.stringify(before)) return false;
+  store.setSetting('me', { ...m, coaches: next });
+  // Newly given athletes: their older records were skipped by earlier pulls
+  // (they weren't readable then), so read everything again.
+  if (next.some((x) => !before.includes(x))) store.setSetting('lastPull', null);
+  // Taken away: drop that athlete's records from this device.
+  const gone = before.filter((x) => !next.includes(x));
+  if (gone.length) {
+    for (const id of gone) store.applyRemote('athletes', id, null);
+    for (const kind of ['assignments', 'logs']) for (const r of store.all(kind)) if (gone.includes(r.athleteId)) store.applyRemote(kind, r.id, null);
+    store.flush();
+  }
+  return true;
+}
+
+// Head coach: which athletes `coachAthleteId` may coach ([] takes it away).
+export async function setCoachAccess(coachAthleteId, athleteIds) {
+  const ids = [...new Set(athleteIds)].filter((x) => x !== coachAthleteId);
+  const q = sb.from('coach_access');
+  const { error } = ids.length
+    ? await q.upsert({ team_id: membership.team_id, coach_athlete_id: coachAthleteId, athlete_ids: ids })
+    : await q.delete().eq('team_id', membership.team_id).eq('coach_athlete_id', coachAthleteId);
+  if (error) throw error;
+  access = { ...coachAccess() };
+  if (ids.length) access[coachAthleteId] = ids; else delete access[coachAthleteId];
 }
 
 function schedulePush() {
@@ -85,9 +140,10 @@ function schedulePush() {
 
 export async function syncNow() {
   if (!membership || !navigator.onLine) return;
+  const accessChanged = await loadAccess();
   await push();
   await pull();
-  if (await loadLogins()) rerender();
+  if ((await loadLogins()) || accessChanged) rerender();
 }
 
 // One upload at a time; a change made during an upload goes in the next one.
@@ -112,12 +168,23 @@ async function pushDirty() {
   if (!error) { store.clearDirty(dirty); return; }
   // One bad row (e.g. an athlete editing something only a coach may) fails the
   // batch, so retry row by row and drop the ones the server refuses.
-  const done = [];
+  const done = [], refused = [];
   for (let i = 0; i < rows.length; i++) {
     const r = await sb.from('records').upsert(rows[i]);
     if (!r.error || r.error.code === '42501') done.push(dirty[i]);
+    if (r.error?.code === '42501') refused.push(rows[i]);
   }
   store.clearDirty(done);
+  // Put refused changes back the way the server has them, so this device
+  // doesn't keep showing a change nobody else will ever see.
+  if (!refused.length) return;
+  for (const row of refused) {
+    const { data } = await sb.from('records').select('data, deleted').eq('team_id', row.team_id).eq('kind', row.kind).eq('id', row.id).maybeSingle();
+    store.applyRemote(row.kind, row.id, data && !data.deleted ? data.data : null);
+  }
+  store.flush();
+  toast(refused.some((r) => r.kind === 'blocks' || r.kind === 'exercises') ? 'Only the head coach can change that. It was put back.' : 'That change wasn\'t allowed, so it was put back.');
+  rerender();
 }
 
 async function pull() {

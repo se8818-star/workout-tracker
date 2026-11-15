@@ -217,9 +217,39 @@ export function exercisesById() { return db.exercises; }
 let seq = 0;
 const mark = () => `${Date.now()}.${seq++}`;
 
+// ---- who may do what on this device ----
+// settings.me is { role: 'coach' } for the head coach, or { role: 'athlete',
+// athleteId, userId, coaches: [athlete ids] } for an athlete. `coaches` lists
+// the athletes the head coach lets this athlete coach too (supabase table
+// coach_access). The database enforces all of this; these only shape the screens.
+export const me = () => db.settings.me || null;
+export const isHeadCoach = () => me()?.role === 'coach';
+// Can this device coach that athlete (see their pages, change their programs)?
+export function canCoach(athleteId) {
+  const m = me();
+  if (m?.role === 'coach') return true;
+  return Boolean(athleteId && m?.athleteId !== athleteId && m?.coaches?.includes(athleteId));
+}
+// An athlete with coaching rights over someone else.
+export const isHelperCoach = () => me()?.role === 'athlete' && Boolean(me()?.coaches?.length);
+// The athletes on this device's coach screens: everyone for the head coach,
+// only the ones they were given for a helper coach.
+export const coachedAthletes = () => all('athletes').filter((a) => canCoach(a.id) && !(me()?.role === 'athlete' && a.id === me()?.athleteId));
+// A helper coach changes only programs (and exercises) they made themselves.
+// Changing one of the head coach's programs for an athlete makes them a copy.
+export const canEditBlock = (b) => demo || isHeadCoach() || Boolean(b?.createdBy && b.createdBy === me()?.userId);
+
+// Programs and exercises a helper coach makes carry their login id, which is
+// what the database checks before letting them change one.
+function stampOwner(kind, obj, prev) {
+  if (demo || isHeadCoach() || (kind !== 'blocks' && kind !== 'exercises')) return;
+  if (prev) { if (prev.createdBy) obj.createdBy = prev.createdBy; else delete obj.createdBy; } else if (me()?.userId) obj.createdBy = me().userId;
+}
+
 export function put(kind, obj) {
   obj.updatedAt = new Date().toISOString();
   const prev = db[kind][obj.id];
+  stampOwner(kind, obj, prev);
   db[kind][obj.id] = obj;
   db.dirty[`${kind}/${obj.id}`] = { n: mark() };
   save('meta', partOf(kind, obj), ...(prev ? [partOf(kind, prev)] : []));
@@ -232,6 +262,7 @@ export function putMany(kind, objs) {
   const parts = new Set(['meta']);
   for (const obj of objs) {
     obj.updatedAt = at;
+    stampOwner(kind, obj, db[kind][obj.id]);
     if (db[kind][obj.id]) parts.add(partOf(kind, db[kind][obj.id]));
     db[kind][obj.id] = obj;
     db.dirty[`${kind}/${obj.id}`] = { n: mark() };
@@ -433,8 +464,9 @@ export function lastTime(athleteId, exerciseId, beforeIso) {
 // a day. A coach previewing an athlete sees the same thing, but nothing is saved
 // until they actually log a set; otherwise the coach's copy, which can be a
 // few seconds behind, would upload over what the athlete just did.
-const ownsLogs = () => demo || db.settings.me?.role !== 'coach';
-const keepLog = (log) => (ownsLogs() ? put('logs', log) : log);
+// A helper coach's device is the athlete's own only for their own logs.
+const ownsLogs = (athleteId) => demo || (db.settings.me?.role !== 'coach' && (!db.settings.me?.athleteId || db.settings.me.athleteId === athleteId));
+const keepLog = (log) => (ownsLogs(log.athleteId) ? put('logs', log) : log);
 
 // What the athlete did before on this day of this program (or the program it
 // was copied from), so weekly rules build on their actual sets.
@@ -521,7 +553,7 @@ export function currentLog(athleteId, iso, cat = 'strength') {
   const picked = log && (log.chosen || (log.switchedFrom !== undefined && (!log.assignmentId || get('assignments', log.assignmentId))));
   if (!log || picked || !untouchedLog(log)) return refreshLog(log);
   const plan = plannedIn(athleteId, iso, cat)[0];
-  if (!plan) { if (ownsLogs()) del('logs', log.id); return null; }
+  if (!plan) { if (ownsLogs(athleteId)) del('logs', log.id); return null; }
   if (plan.block.id !== log.blockId || plan.week !== log.week || plan.dayIndex !== log.dayIndex) return startLog(athleteId, iso, plan);
   return refreshLog(log);
 }
@@ -530,7 +562,7 @@ export function currentWarmupLog(athleteId, iso) {
   const log = warmupLogFor(athleteId, iso);
   if (!log || !untouchedLog(log)) return refreshLog(log);
   const w = warmupOn(athleteId, iso);
-  if (!w) { if (ownsLogs()) del('logs', log.id); return null; }
+  if (!w) { if (ownsLogs(athleteId)) del('logs', log.id); return null; }
   if (w.block.id !== log.blockId) return startWarmupLog(athleteId, iso, w);
   return refreshLog(log);
 }

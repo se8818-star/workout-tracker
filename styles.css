@@ -879,3 +879,7 @@ a.day:hover { text-decoration: none; }
 .cat-head { margin: 16px 0 8px; font: 700 0.75rem var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .cat-head:first-child { margin-top: 0; }
 .cat-head + .asg-card { border-top: 0; margin-top: 0; padding-top: 0; }
+
+/* Head coach: "Also coaches Landon" under an athlete's name. */
+.access-line { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; color: var(--muted, inherit); }
+.access-line .link { margin-left: 4px; }

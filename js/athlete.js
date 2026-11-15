@@ -11,11 +11,12 @@ const today = () => toISO(new Date());
 // A finished workout raises a max by at most this factor on its own.
 const MAX_JUMP = 1.2;
 
-const isCoach = () => store.settings().me?.role === 'coach';
+// The head coach, or a helper coach looking at an athlete they coach.
+const isCoach = (id) => store.canCoach(id) && !(store.me()?.role === 'athlete' && store.me()?.athleteId === id);
 
 // A coach looking at an athlete's pages gets a way back to that athlete's coach page.
 function coachBack(id) {
-  if (!isCoach()) return '';
+  if (!isCoach(id)) return '';
   const a = store.get('athletes', id);
   return `<a class="back" href="#/coach/athlete/${id}">${esc(a?.name || 'Athlete')}</a>`;
 }
@@ -135,7 +136,7 @@ function warmRow(id, iso, name, count, log) {
 // buttons that would save a workout for the athlete are left out for a coach.
 // Returns { html, others } (others: the "Also today" plans, for doOther).
 export function dayCards(id, iso, { peek = false } = {}) {
-  const look = peek || isCoach();
+  const look = peek || isCoach(id);
   // The assigned warmup gets its own row, above the workouts.
   const wlog = store.currentWarmupLog(id, iso), w = store.warmupOn(id, iso);
   const warm = wlog ? warmRow(id, iso, wlog.name, wlog.entries.length, wlog)
@@ -188,7 +189,7 @@ export function today_(root, { id }, query) {
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
-    ${isCoach() ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
+    ${isCoach(id) ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
     ${dateStrip(id, iso)}
     ${html}
     ${last ? `<p class="last-line"><span>Last session</span><a href="${sessionHref(last)}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
@@ -313,15 +314,15 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
   const folds = foldState(log);
   const counts = () => log.entries.reduce((a, e) => [a[0] + e.sets.filter((x) => x.done).length, a[1] + e.sets.length], [0, 0]);
   const [nDone, nAll] = counts();
-  const backTo = isCoach() ? `#/coach/athlete/${id}` : `#/athlete/${id}?d=${date}`;
+  const backTo = isCoach(id) ? `#/coach/athlete/${id}` : `#/athlete/${id}?d=${date}`;
   root.innerHTML = `
     <div class="session-bar">
-      <div class="sb-row"><a class="back" href="${backTo}">${isCoach() ? esc(athlete.name) : fmtDate(date)}</a>${warm ? '' : '<button class="chip" data-action="switch">Switch day</button>'}</div>
+      <div class="sb-row"><a class="back" href="${backTo}">${isCoach(id) ? esc(athlete.name) : fmtDate(date)}</a>${warm ? '' : '<button class="chip" data-action="switch">Switch day</button>'}</div>
       <div class="sb-row"><span class="sb-title">${esc(warm ? 'Warmup' : log.name)}</span><span class="sb-count" id="sb-count"><b>${nDone}</b> of ${nAll} sets</span></div>
       <div class="progress"><i id="sb-bar" style="width:${nAll ? (nDone / nAll) * 100 : 0}%"></i></div>
     </div>
     <p class="kicker">${warm ? 'Before your workout' : block ? (() => { const pg = store.logProgram(log); return progTag(pg.name, pg.color, log.week); })() : ''}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
-    ${!warm && isCoach() && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
+    ${!warm && isCoach(id) && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
     <div style="height:10px"></div>
     ${warm ? log.entries.map((e, i) => entryCard(log, e, i, labels[i], folds[i])).join('') : log.entries.map((e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
