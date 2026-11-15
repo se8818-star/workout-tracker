@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TEMPLATES } from '../js/templates.js';
-import { buildSession, sessionTotals } from '../js/calc.js';
+import { buildSession, sessionTotals, sectionStarts, sessionEntries, refreshEntries } from '../js/calc.js';
 
 test('every template item uses an exercise the template brings', () => {
   for (const t of TEMPLATES) {
@@ -80,11 +80,28 @@ test('Landon Warmup is its own warmup template', () => {
   assert.equal(t.kind, 'warmup');
   assert.equal(t.name, 'Landon Warmup');
   const items = t.block.days[0].items;
-  assert.equal(items.length, 15);
+  assert.equal(items.length, 33);
   assert.ok(items.every((x) => x.warmup));
   assert.equal(items.find((x) => x.exerciseId === 'bretzel').measure, 'breaths');
+  const s = buildSession(t.block, 0, 0, { maxes: {} });
+  assert.deepEqual(sectionStarts(s.items).filter(Boolean), ['P1 · Foam roll', 'P2 · RPR', 'P3 · Expansionary', 'Dynamic']);
+  const count = (sec) => s.items.filter((x) => x.section === sec).length;
+  assert.deepEqual([count('P1 · Foam roll'), count('P2 · RPR'), count('P3 · Expansionary'), count('Dynamic')], [9, 11, 9, 4]);
+  assert.ok(s.items.filter((x) => x.section === 'P2 · RPR').every((x) => x.measure === 'time' && x.sets[0].secs === 10));
 });
 
 test('template exercise ids are unique within each template', () => {
   for (const t of TEMPLATES) assert.equal(new Set(t.exercises.map((e) => e.id)).size, t.exercises.length, t.id);
+});
+
+test('a section name reaches log entries and follows coach edits', () => {
+  const block = { weeks: 1, kind: 'warmup', days: [{ name: 'W', items: [{ exerciseId: 'a', sets: 1, reps: 5, section: 'Foam roll' }, { exerciseId: 'b', sets: 1, reps: 5 }] }] };
+  const old = sessionEntries(buildSession(block, 0, 0, {}), 'lb');
+  assert.equal(old[0].section, 'Foam roll');
+  old[1].sets[0].done = true;
+  block.days[0].items[0].section = 'Mobility';
+  block.days[0].items[1].section = 'Mobility';
+  const out = refreshEntries(old, sessionEntries(buildSession(block, 0, 0, {}), 'lb'));
+  assert.deepEqual(out.map((e) => e.section), ['Mobility', 'Mobility']);
+  assert.deepEqual(sectionStarts(out), ['Mobility', '']);
 });

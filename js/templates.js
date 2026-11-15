@@ -332,9 +332,38 @@ const LANDON_BLOCK = {
   ],
 };
 
+// Landon's warmup comes in sections (P1 foam roll, P2 RPR, P3 expansionary,
+// then the dynamic drills); each line of the sheet is its own exercise, and
+// item.section puts a heading above each part. Each section is also grouped,
+// so all of its items open together on the athlete's warmup page.
+const FOAM = [
+  ['foam-roll-quads', 'Foam roll: quads', 'lower', 'Extra time'],
+  ['foam-roll-adductors', 'Foam roll: adductors', 'lower', 'Extra time'],
+  ['foam-roll-calves', 'Foam roll: calves', 'lower', 'Extra time'],
+  ['foam-roll-it-band', 'Foam roll: IT band / TFL', 'lower'],
+  ['foam-roll-hip-flexors', 'Foam roll: hip flexors', 'lower'],
+  ['foam-roll-hamstrings', 'Foam roll: hamstrings', 'lower'],
+  ['foam-roll-lats', 'Foam roll: lats', 'upper'],
+  ['foam-roll-t-spine', 'Foam roll: T-spine', 'upper'],
+  ['foam-roll-feet', 'Foam roll: arches of feet', 'lower', 'Lax ball'],
+];
+const RPR = [
+  ['rpr-jaw', 'RPR: jaw'],
+  ['rpr-skull', 'RPR: base of skull'],
+  ['rpr-sternum', 'RPR: down the sternum'],
+  ['rpr-ribs', 'RPR: edge of ribs'],
+  ['rpr-belly', 'RPR: either side of belly button'],
+  ['rpr-hip-flexors', 'RPR: hip flexors'],
+  ['rpr-glutes', 'RPR: chop out glutes'],
+  ['rpr-legs', 'RPR: chop out legs (VMO)'],
+  ['rpr-lats', 'RPR: scratch up lats'],
+  ['rpr-pecs', 'RPR: between pecs and shoulders'],
+  ['rpr-collarbone', 'RPR: inch below collarbone across'],
+];
+
 const LANDON_WARMUP_EXERCISES = [
-  L('foam-roll', 'Foam roll', 'other', 'full', false),
-  L('rpr', 'RPR', 'other', 'full', false),
+  ...FOAM.map(([id, name, body]) => L(id, name, 'other', body, false)),
+  ...RPR.map(([id, name]) => L(id, name, 'other', 'full', false)),
   L('upper-back-expansion', 'Upper back expansion w/ wall sit', 'other', 'upper', false, 'https://youtu.be/z8G4O4OhV18'),
   L('turtle-rocking', 'Turtle rocking', 'other', 'full', false, 'https://youtu.be/z8G4O4OhV18'),
   L('couch-stretch-reach', 'Couch stretch w/ reach & rotation', 'other', 'lower', false, 'https://www.youtube.com/watch?v=Crpg-RkwW2Y'),
@@ -350,23 +379,24 @@ const LANDON_WARMUP_EXERCISES = [
   L('backpedal-jog', 'Backpedal to jog', 'other', 'lower', false),
 ];
 
-const lw = (exerciseId, sets, reps, opts = {}) => ({ ...li(exerciseId, sets, reps, opts), warmup: true });
+const lw = (section, group) => (exerciseId, sets, reps, opts = {}) => ({ ...li(exerciseId, sets, reps, { ...opts, group }), section, warmup: true });
+const P1 = lw('P1 · Foam roll', 'P'), P2 = lw('P2 · RPR', 'R'), P3 = lw('P3 · Expansionary', 'E'), DYN = lw('Dynamic', 'D');
 const LANDON_WARMUP = [
-  lw('foam-roll', 1, null, { measure: 'none', note: 'Must do before sprinting (with RPR and the dynamic drills).\nExtra time on quads, adductors and calves. Then IT band/TFL, hip flexors, hamstrings, lats, T-spine, arches of feet (lax ball).' }),
-  lw('rpr', 1, null, { measure: 'none', note: "10 s each (Jack's video): jaw, base of skull, down the sternum, edge of ribs, either side of belly button, hip flexors, chop out glutes, chop out legs (VMO), scratch up lats, between pecs and shoulders, inch below collarbone across." }),
-  lw('upper-back-expansion', 1, null, { measure: 'none' }),
-  lw('turtle-rocking', 1, 8),
-  lw('couch-stretch-reach', 1, 8, { note: EACH }),
-  lw('bretzel', 1, 8, { measure: 'breaths', note: EACH }),
-  lw('supine-cross-connect', 1, 3, { measure: 'breaths', note: EACH }),
-  lw('fr-sidelying-step-over', 1, 6, { note: EACH }),
-  lw('ipsi-ffe-kb-split-squat', 1, 8, { note: `${EACH} Front foot up on a 6 inch box.` }),
-  lw('seated-90-90-kb-switch', 1, 5, { weight: 15, note: `${EACH} 15 lb KB.` }),
-  lw('hk-tibial-ir-mobs', 1, 8, { note: EACH }),
-  lw('side-shuffle-jog', 1, null, { measure: 'none', note: '10 yd shuffle + 10 yd jog' }),
-  lw('carioca', 1, null, { measure: 'none', note: '20 yards' }),
-  lw('skipping', 1, null, { measure: 'none', note: '20 yards' }),
-  lw('backpedal-jog', 1, null, { measure: 'none', note: '2 × (10 yd backpedal + 10 yd jog)' }),
+  ...FOAM.map(([id, , , note], i) => P1(id, 1, null, { measure: 'none', note: [i === 0 && 'Must do before sprinting (with RPR and the dynamic drills).', note].filter(Boolean).join('\n') })),
+  ...RPR.map(([id], i) => P2(id, 1, null, { measure: 'time', secs: 10, ...(i === 0 ? { note: "Jack's video. 10 s each." } : {}) })),
+  P3('upper-back-expansion', 1, null, { measure: 'none' }),
+  P3('turtle-rocking', 1, 8),
+  P3('couch-stretch-reach', 1, 8, { note: EACH }),
+  P3('bretzel', 1, 8, { measure: 'breaths', note: EACH }),
+  P3('supine-cross-connect', 1, 3, { measure: 'breaths', note: EACH }),
+  P3('fr-sidelying-step-over', 1, 6, { note: EACH }),
+  P3('ipsi-ffe-kb-split-squat', 1, 8, { note: `${EACH} Front foot up on a 6 inch box.` }),
+  P3('seated-90-90-kb-switch', 1, 5, { weight: 15, note: `${EACH} 15 lb KB.` }),
+  P3('hk-tibial-ir-mobs', 1, 8, { note: EACH }),
+  DYN('side-shuffle-jog', 1, null, { measure: 'none', note: '10 yd shuffle + 10 yd jog' }),
+  DYN('carioca', 1, null, { measure: 'none', note: '20 yards' }),
+  DYN('skipping', 1, null, { measure: 'none', note: '20 yards' }),
+  DYN('backpedal-jog', 1, null, { measure: 'none', note: '2 × (10 yd backpedal + 10 yd jog)' }),
 ];
 
 export const TEMPLATES = [
@@ -403,7 +433,7 @@ export const TEMPLATES = [
     id: 'landon-warmup',
     kind: 'warmup',
     name: 'Landon Warmup',
-    about: 'Foam roll, RPR, 9 mobility drills and 4 dynamic drills from the Warmup tab of Landon\'s sheet. Do it before sprinting.',
+    about: 'Four sections from the Warmup tab of Landon\'s sheet: P1 foam roll (9 areas), P2 RPR (11 spots, 10 s each), P3 expansionary (9 drills), dynamic (4 drills). Do it before sprinting.',
     block: { name: 'Landon Warmup', kind: 'warmup', weeks: 1, deloadWeek: null, days: [{ name: 'Warmup', items: LANDON_WARMUP }] },
     exercises: LANDON_WARMUP_EXERCISES,
   },

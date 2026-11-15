@@ -891,3 +891,21 @@ a.day:hover { text-decoration: none; }
 .day i.wdot { width: 6px; height: 6px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--hi); }
 .day i.wdot.done { background: var(--hi); box-shadow: none; }
 .wk-card { touch-action: pan-y; }
+
+/* Named sections inside a warmup or workout (item.section): each gets its
+   own colour (cycling through four), a tinted panel and a heading with a count. */
+.sec-c0 { --sec: #b97800; } .sec-c1 { --sec: #0e8a8c; } .sec-c2 { --sec: #7650e0; } .sec-c3 { --sec: #2b6bd6; }
+:root[data-theme="dark"] .sec-c0 { --sec: #e2a94a; } :root[data-theme="dark"] .sec-c1 { --sec: #3fc1c3; }
+:root[data-theme="dark"] .sec-c2 { --sec: #a58cff; } :root[data-theme="dark"] .sec-c3 { --sec: #6fa1ff; }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] .sec-c0 { --sec: #e2a94a; } :root[data-theme="auto"] .sec-c1 { --sec: #3fc1c3; }
+  :root[data-theme="auto"] .sec-c2 { --sec: #a58cff; } :root[data-theme="auto"] .sec-c3 { --sec: #6fa1ff; }
+}
+.sec-group { margin: 18px -6px; padding: 4px 6px 6px; border-radius: 20px; background: color-mix(in srgb, var(--sec) 9%, transparent); border: 1px solid color-mix(in srgb, var(--sec) 22%, transparent); }
+.sec-group .entry { border-left: 5px solid var(--sec); }
+.sec-group .entry .order { background: color-mix(in srgb, var(--sec) 16%, transparent); color: var(--sec); }
+.sec-group .entry.complete .order { background: var(--turf); color: #fff; }
+.sec-sub { display: flex; align-items: center; gap: 8px; margin: 10px 6px 10px; font: 800 0.8rem var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--sec, var(--muted)); }
+.sec-sub::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--sec, var(--muted)); flex-shrink: 0; }
+.sec-sub small { margin-left: auto; font-size: 0.75rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--sec) 16%, transparent); }
+h5.sec-sub { margin: 16px 2px 6px; }
