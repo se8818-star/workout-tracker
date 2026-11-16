@@ -226,6 +226,12 @@ function settingsView(root) {
 }
 
 window.addEventListener('hashchange', () => render());
+// Leaving the app mid-typing (home button, lock screen, switching apps): a
+// number box only saves when it loses focus, so let go of it now and the
+// weight or reps just typed is saved instead of lost.
+const letGo = () => { const a = document.activeElement; if (a?.matches?.('input, textarea')) a.blur(); };
+document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
+window.addEventListener('pagehide', letGo);
 styledSelects();
 demoLinks();
 render();

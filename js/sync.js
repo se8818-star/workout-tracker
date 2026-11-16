@@ -56,7 +56,9 @@ export async function startSync(render) {
     setInterval(syncNow, 30000);
     if (membership.role === 'coach') sweepVideos().catch((e) => console.warn(e));
     window.addEventListener('online', syncNow);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+    // Leaving the app: upload now rather than after the usual short wait, which
+    // a phone may never give a page in the background.
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(pushTimer); push().catch(() => {}); } else syncNow(); });
   }
 }
 
