@@ -4,16 +4,27 @@
 
 import { SEED_EXERCISES, SEED_BLOCK } from './seed.js';
 export { SEED_EXERCISES };
+import { merge3, mergeLog, same } from './merge.js';
 import { buildSession, lastDoneFrom, sessionEntries, refreshEntries, applyLogAs, untouchedLog, assignmentStatus, daysBetween, addDays, loggedWork, scheduledOn, warmupScheduledOn, tagPctOfMax, estimateMaxes, applyEstimates, clearedAfter, toUnit, fromUnit, LB_PER_KG } from './calc.js';
 
 let KEY = 'wt-db-v1';
 export const KINDS = ['exercises', 'athletes', 'blocks', 'assignments', 'logs'];
+// Records two devices are likely to change at once (a coach and an athlete,
+// or a coach's phone and laptop). For these the device keeps the server's
+// last copy too, so a clash can be merged field by field (see merge.js).
+const MERGE_KINDS = ['athletes', 'blocks', 'assignments'];
 
 let db = null;
 const listeners = new Set();
 
 function blank() {
-  return { exercises: {}, athletes: {}, blocks: {}, assignments: {}, logs: {}, settings: { units: 'lb', rounding: 5 }, dirty: {} };
+  return { exercises: {}, athletes: {}, blocks: {}, assignments: {}, logs: {}, settings: { units: 'lb', rounding: 5 }, dirty: {}, ...syncParts() };
+}
+// versions[kind][id]: the server's updated_at of the copy this device last saw,
+// sent with each upload so the server can refuse one made from an older copy.
+// synced[kind][id]: that server copy itself, for MERGE_KINDS.
+function syncParts() {
+  return { versions: Object.fromEntries(KINDS.map((k) => [k, {}])), synced: Object.fromEntries(MERGE_KINDS.map((k) => [k, {}])) };
 }
 
 // Saved in parts: every kind of record, the logs split by month, and "meta"
@@ -30,6 +41,8 @@ let single = false; // localStorage too full to split an old copy: keep saving i
 // A part's contents, or null for a month with no workouts left.
 function partData(part) {
   if (part === 'meta') return { settings: db.settings, dirty: db.dirty };
+  if (part.startsWith('versions:')) return db.versions[part.slice(9)];
+  if (part.startsWith('synced:')) return db.synced[part.slice(7)];
   if (!part.startsWith('logs:')) return db[part];
   const m = part.slice(5), data = {};
   let any = false;
@@ -38,7 +51,7 @@ function partData(part) {
 }
 
 function allParts() {
-  const parts = new Set(['meta', ...KINDS.filter((k) => k !== 'logs')]);
+  const parts = new Set(['meta', ...KINDS.filter((k) => k !== 'logs'), ...KINDS.map((k) => `versions:${k}`), ...MERGE_KINDS.map((k) => `synced:${k}`)]);
   for (const id in db.logs) parts.add(`logs:${monthOf(db.logs[id])}`);
   return parts;
 }
@@ -52,7 +65,7 @@ function writeChanged() {
       const tx = idb.transaction('parts', 'readwrite'), os = tx.objectStore('parts');
       for (const p of parts) { const d = partData(p); if (d) os.put(d, `${KEY}:${p}`); else os.delete(`${KEY}:${p}`); }
       tx.onabort = () => { for (const p of parts) changed.add(p); }; // retried with the next save
-    } else if (single) localStorage.setItem(KEY, JSON.stringify(db));
+    } else if (single) localStorage.setItem(KEY, JSON.stringify({ ...db, versions: undefined, synced: undefined })); // no room to spare: versions are re-learned
     else for (const p of parts) { const d = partData(p); if (d) localStorage.setItem(`${KEY}:${p}`, JSON.stringify(d)); else localStorage.removeItem(`${KEY}:${p}`); }
     changed.clear();
   } catch { /* private mode or full: keep in memory, retry these parts next save */ }
@@ -71,12 +84,14 @@ const assemble = (entries) => {
   for (const [key, val] of entries) {
     const part = key.slice(KEY.length + 1);
     if (part === 'meta') { Object.assign(d, val); found = true; } else if (part.startsWith('logs:')) Object.assign(d.logs, val); else if (KINDS.includes(part)) d[part] = val;
+    else if (part.startsWith('versions:') && d.versions[part.slice(9)]) d.versions[part.slice(9)] = val;
+    else if (part.startsWith('synced:') && d.synced[part.slice(7)]) d.synced[part.slice(7)] = val;
   }
   return found ? d : null;
 };
 const lsKeys = () => { const keys = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === KEY || k.startsWith(`${KEY}:`)) keys.push(k); } return keys; };
 const lsParts = () => assemble(lsKeys().filter((k) => k !== KEY).map((k) => [k, JSON.parse(localStorage.getItem(k))]));
-const lsSingle = () => { const d = JSON.parse(localStorage.getItem(KEY) || 'null'); if (d) d.dirty ||= {}; return d; };
+const lsSingle = () => { const d = JSON.parse(localStorage.getItem(KEY) || 'null'); if (d) { d.dirty ||= {}; Object.assign(d, { ...syncParts(), ...d }); } return d; };
 
 function openIdb() {
   return new Promise((resolve) => {
@@ -144,6 +159,9 @@ export function load({ cloud = false } = {}) {
     db = d;
     if (!db) { db = blank(); if (demo) seedDemo(); for (const p of allParts()) changed.add(p); }
     db.dirty ||= {};
+    const fresh = syncParts();
+    db.versions = { ...fresh.versions, ...db.versions };
+    db.synced = { ...fresh.synced, ...db.synced };
     return db;
   };
   if (typeof indexedDB === 'undefined') { idb = null; return Promise.resolve(finish(moveFromLocalStorage())); }
@@ -163,18 +181,22 @@ export function load({ cloud = false } = {}) {
 export const isDemo = () => demo;
 
 // Records arriving from the server: saved locally without marking them dirty.
-// Returns true only if something actually changed (our own uploads come back
-// as echoes, and re-rendering for those would wipe whatever is being typed).
-export function applyRemote(kind, id, data) {
+// `at` is the server's updated_at for that copy. Returns true only if
+// something actually changed (our own uploads come back as echoes, and
+// re-rendering for those would wipe whatever is being typed).
+export function applyRemote(kind, id, data, at) {
   if (!db[kind]) return false;
   if (kind === 'logs') logIndex = null;
   if (db.dirty[`${kind}/${id}`]) {
-    // A local edit is waiting to upload; it wins, except that a workout
-    // finished on another device beats an unfinished copy here.
+    // A local edit is waiting to upload; it wins for now (the upload finds
+    // out if it clashes, see resolveConflict), except that a workout finished
+    // on another device beats an unfinished copy here. The version stays the
+    // one the edit started from.
     if (!(kind === 'logs' && data?.finished && !db[kind][id]?.finished)) return false;
     delete db.dirty[`${kind}/${id}`];
     changed.add('meta');
   }
+  if (at) noteServer(kind, id, data, at);
   const cur = db[kind][id];
   if (!data) { if (!cur) return false; delete db[kind][id]; changed.add(partOf(kind, cur)); return true; }
   if (cur && JSON.stringify(cur) === JSON.stringify(data)) return false;
@@ -183,6 +205,81 @@ export function applyRemote(kind, id, data) {
   if (cur) changed.add(partOf(kind, cur));
   return true;
 }
+
+// Remember the server's copy and its version.
+function noteServer(kind, id, data, at) {
+  db.versions[kind][id] = at;
+  changed.add(`versions:${kind}`);
+  if (!db.synced[kind]) return;
+  if (data) db.synced[kind][id] = structuredClone(data); else delete db.synced[kind][id];
+  changed.add(`synced:${kind}`);
+}
+
+// ---- uploading with versions (sync.js) ----
+
+// The row to upload for a dirty record. `base` is the server version this
+// device's copy was built on: the server saves the row only if it still has
+// that version (null: only if it has no such record yet). Without `base` the
+// row is saved whatever the server has (before this device knew versions).
+export function uploadRow(key, m, teamId) {
+  const [kind, id] = key.split('/');
+  const rec = get(kind, id);
+  const row = { team_id: teamId, kind, id, data: rec || m?.data || {}, deleted: isDeleted(m) || !rec };
+  if (db.versions[kind] && id in db.versions[kind]) row.base = db.versions[kind][id];
+  else if (db.settings.versionsReady) row.base = null;
+  return row;
+}
+
+// The server saved `row`. res = { updated_at, data?, deleted? }; data comes
+// back only when the server kept something different (e.g. a finished
+// workout over an unfinished copy). Returns true if this device's copy changed.
+export function uploaded(key, m, row, res) {
+  const [kind, id] = key.split('/');
+  const kept = res.data != null;
+  const data = kept ? res.data : row.data, gone = kept ? Boolean(res.deleted) : row.deleted;
+  noteServer(kind, id, gone ? null : data, res.updated_at);
+  if (db.dirty[key] !== m) return false; // changed again since: that goes up next
+  delete db.dirty[key];
+  changed.add('meta');
+  if (!kept) return false;
+  const cur = db[kind][id];
+  if (cur) changed.add(partOf(kind, cur));
+  if (gone) delete db[kind][id]; else { db[kind][id] = data; changed.add(partOf(kind, data)); }
+  if (kind === 'logs') logIndex = null;
+  return true;
+}
+
+// The server refused an upload because another device changed the record
+// first. res = { updated_at, data, deleted }: the server's copy now. This
+// device's copy and the server's are merged (merge.js); returns 'retry' when
+// the merged copy still needs uploading, 'taken' when the server's copy is
+// simply kept.
+export function resolveConflict(key, m, res) {
+  const [kind, id] = key.split('/');
+  const base = db.synced[kind]?.[id];
+  noteServer(kind, id, res.deleted ? null : res.data, res.updated_at);
+  const local = db[kind][id] || null;
+  const requeue = (extra = {}) => { db.dirty[key] = { n: mark(), ...extra }; changed.add('meta'); return 'retry'; };
+  const take = () => {
+    if (local) changed.add(partOf(kind, local));
+    if (res.deleted) delete db[kind][id]; else { db[kind][id] = res.data; changed.add(partOf(kind, res.data)); }
+    delete db.dirty[key];
+    changed.add('meta');
+    if (kind === 'logs') logIndex = null;
+    return 'taken';
+  };
+  if (!local) return res.deleted ? take() : requeue({ deleted: true, data: res.data }); // deleted here: the delete stands
+  // Deleted on the other device: gone here too, unless it's a workout with sets logged in it.
+  if (res.deleted) return kind === 'logs' && loggedWork(local) ? requeue() : take();
+  const merged = kind === 'logs' ? mergeLog(local, res.data) : db.synced[kind] ? merge3(base, local, res.data) : local;
+  if (same(merged, res.data)) return take();
+  changed.add(partOf(kind, local));
+  db[kind][id] = merged;
+  changed.add(partOf(kind, merged));
+  if (kind === 'logs') logIndex = null;
+  return requeue();
+}
+
 export function flush() { save('meta'); }
 
 // Removes every saved part (and any old localStorage copy) before starting over.

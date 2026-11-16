@@ -358,3 +358,68 @@ end $$;
 drop trigger if exists records_keep_videos on records;
 create trigger records_keep_videos before update on records
   for each row execute function keep_log_videos();
+-- Saving with versions: the app sends each change with the version of the
+-- record it started from ("base", the server's updated_at). The row is saved
+-- only if the server still has that version, so an older copy from another
+-- device can't quietly overwrite a newer change. When it doesn't match, the
+-- server's copy comes back and the app merges the two, then sends again.
+-- Rows without "base" are saved as before. Runs as the signed-in user, so the
+-- same who-may-change-what rules apply.
+-- Returns one result per row, in order:
+--   {status: 'saved', updated_at, data?, deleted?}  (data only if the server kept something else)
+--   {status: 'conflict', updated_at, data, deleted} (the server's copy now)
+--   {status: 'refused'}                             (not allowed to change it)
+create or replace function save_records(items jsonb) returns jsonb
+language plpgsql security invoker set search_path = public as $$
+declare
+  r jsonb; res jsonb := '[]'::jsonb;
+  t uuid; k text; i text; d jsonb; del boolean; base timestamptz;
+  at timestamptz; got jsonb; gone boolean; ok boolean;
+begin
+  for r in select value from jsonb_array_elements(items) loop
+    t := (r->>'team_id')::uuid; k := r->>'kind'; i := r->>'id';
+    d := r->'data'; del := coalesce((r->>'deleted')::boolean, false);
+    begin
+      ok := false;
+      if not (r ? 'base') then
+        insert into records (team_id, kind, id, data, deleted) values (t, k, i, d, del)
+          on conflict (team_id, kind, id) do update set data = excluded.data, deleted = excluded.deleted
+          returning updated_at, data, deleted into at, got, gone;
+        ok := found;
+      elsif jsonb_typeof(r->'base') = 'null' then
+        insert into records (team_id, kind, id, data, deleted) values (t, k, i, d, del)
+          on conflict (team_id, kind, id) do nothing
+          returning updated_at, data, deleted into at, got, gone;
+        ok := found;
+      else
+        base := (r->>'base')::timestamptz;
+        update records set data = d, deleted = del
+          where team_id = t and kind = k and id = i and updated_at = base
+          returning updated_at, data, deleted into at, got, gone;
+        ok := found;
+      end if;
+      if ok then
+        res := res || jsonb_build_array(jsonb_build_object('status', 'saved', 'updated_at', at)
+          || case when got is distinct from d or gone is distinct from del then jsonb_build_object('data', got, 'deleted', gone) else '{}'::jsonb end);
+      else
+        select updated_at, data, deleted into at, got, gone from records where team_id = t and kind = k and id = i;
+        if not found then
+          -- Not there (or not visible to this user): a plain insert either works or is refused.
+          insert into records (team_id, kind, id, data, deleted) values (t, k, i, d, del)
+            returning updated_at into at;
+          res := res || jsonb_build_array(jsonb_build_object('status', 'saved', 'updated_at', at));
+        elsif base is not null and at = base then
+          -- Same version, but the update didn't go through: not allowed to change it.
+          res := res || jsonb_build_array(jsonb_build_object('status', 'refused'));
+        else
+          res := res || jsonb_build_array(jsonb_build_object('status', 'conflict', 'updated_at', at, 'data', got, 'deleted', gone));
+        end if;
+      end if;
+    exception when insufficient_privilege or unique_violation or check_violation then
+      res := res || jsonb_build_array(jsonb_build_object('status', 'refused'));
+    end;
+    base := null;
+  end loop;
+  return res;
+end $$;
+grant execute on function save_records(jsonb) to authenticated;
