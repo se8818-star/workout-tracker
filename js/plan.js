@@ -7,7 +7,10 @@
 // byWeek[week].exerciseId (another exercise that week) and byWeek[week].off
 // (the exercise is left out that week). Week 1 (0) is the item itself.
 
-import { prescribedSets, prescribedReps, prescribedRepsTo, prescribedSecs, prescribedPct, isDeload, offInWeek, exerciseInWeek, measureOf } from './calc.js';
+import { prescribedSets, prescribedReps, prescribedRepsTo, prescribedSecs, prescribedPct, isDeload, offInWeek, exerciseInWeek, measureOf, TEXT_WEEK_KEYS } from './calc.js';
+
+// Note, tempo and target RPE: one value per week, no weekly rule on top.
+const TEXT = TEXT_WEEK_KEYS;
 
 const own = (it, w, k) => it.byWeek?.[w]?.[k] != null;
 
@@ -37,6 +40,8 @@ function valueAt(it, b, k, w) {
     case 'weight': return weightAt(it, b, w);
     case 'exerciseId': return exerciseInWeek(it, w);
     case 'reps': return { reps: prescribedReps(it, w), repsTo: prescribedRepsTo(it, w) };
+    // Words and the target RPE: '' when there are none.
+    case 'note': case 'tempo': case 'rpe': return own(it, w, k) ? it.byWeek[w][k] : (it[k] ?? '');
     default: return null;
   }
 }
@@ -62,15 +67,16 @@ function tidy(it, b, k) {
 // Week 1 is the item itself: set its value.
 function setBase(it, k, v) {
   if (k === 'reps') { it.reps = v.reps; if (v.repsTo != null) it.repsTo = v.repsTo; else delete it.repsTo; return; }
+  if (v === '' && TEXT.includes(k)) { delete it[k]; return; }
   it[k] = v;
 }
 
 // Move week 1 and the weeks from `from` on that have their own number by
 // the same amount, so a weekly rule or a deload still applies on top.
 function shift(it, b, k, from, oldV, next) {
-  if (k === 'exerciseId') {
-    it.exerciseId = next;
-    for (let w = Math.max(1, from); w < b.weeks; w++) setOwn(it, w, { exerciseId: null });
+  if (k === 'exerciseId' || TEXT.includes(k)) {
+    setBase(it, k, next);
+    for (let w = Math.max(1, from); w < b.weeks; w++) setOwn(it, w, { [k]: null });
     return;
   }
   if (k === 'reps') {
@@ -95,7 +101,8 @@ function shift(it, b, k, from, oldV, next) {
 }
 
 // Change one exercise (day di, item ii) as seen in `week`.
-// change: any of { exerciseId, sets, reps: {reps, repsTo}, secs, pct, weight }.
+// change: any of { exerciseId, sets, reps: {reps, repsTo}, secs, pct, weight,
+// note, tempo, rpe } (note/tempo/rpe '' = none).
 // scope 'week' = only that week; 'rest' = that week to the end of the program.
 // Weeks before `week` keep exactly what they had. Returns a new block.
 export function changeItem(block, di, ii, week, change, scope) {
@@ -166,5 +173,65 @@ export function weekView(item, block, week) {
     secs: m === 'time' ? prescribedSecs(item, week) : null,
     pct: item.pct != null ? prescribedPct(item, week, block) : null,
     weight: item.weight != null ? weightAt(item, block, week) : null,
+    note: valueAt(item, block, 'note', week),
+    tempo: valueAt(item, block, 'tempo', week),
+    rpe: valueAt(item, block, 'rpe', week),
   };
+}
+
+// Move an exercise up (-1) or down (+1) past the next one of its kind
+// (warmup items among the warmup, the rest among the rest). The order is the
+// same every week.
+export function moveItem(block, di, ii, dir) {
+  const b = structuredClone(block);
+  const items = b.days[di].items;
+  const warm = !!items[ii]?.warmup;
+  let j = ii + dir;
+  while (j >= 0 && j < items.length && !!items[j].warmup !== warm) j += dir;
+  if (j < 0 || j >= items.length) return b;
+  [items[ii], items[j]] = [items[j], items[ii]];
+  return b;
+}
+
+// Change how an exercise is logged ('reps', 'time', 'breaths', 'none'),
+// for every week. Matches the program editor.
+export function setItemMeasure(block, di, ii, m) {
+  const b = structuredClone(block);
+  const it = b.days[di].items[ii];
+  if (m === 'reps') delete it.measure; else it.measure = m;
+  if (m === 'time' && it.secs == null) it.secs = 30;
+  if ((m === 'reps' || m === 'breaths') && it.reps == null) it.reps = m === 'breaths' ? 5 : 8;
+  if (m !== 'reps' && m !== 'breaths' && it.reps == null) delete it.reps;
+  if (m === 'breaths' || m === 'none') clearLoad(it);
+  const pt = it.progression?.type;
+  if ((pt === 'add_reps' && m !== 'reps' && m !== 'breaths') || (pt === 'add_secs' && m !== 'time') || m === 'none'
+    || (m === 'breaths' && ['add_pct', 'add_weight'].includes(pt))) delete it.progression;
+  return b;
+}
+
+function clearLoad(it) {
+  delete it.pct; delete it.weight; delete it.maxFrom;
+  if (['add_pct', 'add_weight'].includes(it.progression?.type)) delete it.progression;
+  for (const w of Object.keys(it.byWeek || {})) setOwn(it, w, { pct: null, weight: null });
+}
+
+// Give an exercise a different kind of load, for every week: 'none', a
+// fixed 'weight' (lb) or 'pct' of max. value = the number to start from.
+export function setItemLoad(block, di, ii, kind, value = null) {
+  const b = structuredClone(block);
+  const it = b.days[di].items[ii];
+  clearLoad(it);
+  if (kind === 'weight') it.weight = value ?? 0;
+  if (kind === 'pct') it.pct = value ?? 70;
+  return b;
+}
+
+// Put an exercise in a superset (a letter like 'A') or take it out (''),
+// for every week.
+export function setItemGroup(block, di, ii, group) {
+  const b = structuredClone(block);
+  const it = b.days[di].items[ii];
+  const g = String(group || '').trim().toUpperCase().slice(0, 3);
+  if (g) it.group = g; else delete it.group;
+  return b;
 }
