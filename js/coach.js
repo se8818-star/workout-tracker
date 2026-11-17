@@ -1,7 +1,7 @@
 // Coach screens: team board, athlete detail, block builder, assigning, exercise library.
 
 import * as store from './store.js';
-import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, rpeLine, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, sectionStarts, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS } from './calc.js';
+import { toISO, addDays, daysBetween, weekStart, buildSession, sessionTotals, addTotals, emptyTotals, parseQuickEntry, defaultWeekdays, measureOf, isCount, fromUnit, prescribedSets, prescribedReps, prescribedRepsTo, parseReps, repsText, prescribedSecs, prescribedPct, prescribedWeight, weekOverride, offInWeek, exerciseInWeek, loggedWork, rpeLine, assignmentStatus, scheduledOn, libraryView, libraryMatch, patternOf, sectionStarts, filterCount, EST_MAX_REPS, PATTERNS, PLYO_TIERS, TEXT_WEEK_KEYS } from './calc.js';
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, toast, stat, unitSeg, ask, askFields, choose, sheet, closeSheet, demoSheet, demoAttrs, PATTERN_LABEL, $ } from './ui.js';
 import { changeItem, removeItem, restoreItem, addItem, weekView } from './plan.js';
@@ -507,7 +507,7 @@ function newItem(exId, warm) {
 // The numbers that change week to week. Week 1 is the item itself; later
 // weeks can override them in item.byWeek.
 const WEEK_KEYS = ['sets', 'reps', 'secs', 'pct', 'weight'];
-const hasOwn = (item, week) => WEEK_KEYS.some((k) => weekOverride(item, week, k) != null) || offInWeek(item, week) || exerciseInWeek(item, week) !== item.exerciseId;
+const hasOwn = (item, week) => [...WEEK_KEYS, ...TEXT_WEEK_KEYS].some((k) => weekOverride(item, week, k) != null) || offInWeek(item, week) || exerciseInWeek(item, week) !== item.exerciseId;
 
 // Sets an item's number for one week. A value that matches what the weekly
 // rule would give anyway isn't kept, so later rule changes still reach it.
@@ -1406,7 +1406,7 @@ function weekNow(g, b) {
 
 // The block to change for this athlete. When others are on the same program
 // they keep the original: this athlete gets their own copy first.
-function ownBlock(g, b, a) {
+export function ownBlock(g, b, a) {
   // A helper coach always works on a copy of the head coach's programs.
   const shared = !store.canEditBlock(b) || store.all('assignments').some((x) => x.blockId === b.id && x.id !== g.id);
   if (!shared) return b;
@@ -1418,7 +1418,7 @@ function ownBlock(g, b, a) {
 }
 
 // "3 × 8–10 · 75%", or "Check off".
-function planNums(v, unit) {
+export function planNums(v, unit) {
   if (v.measure === 'none') return 'Check off';
   let t = `${v.sets} × ${v.measure === 'time' ? `${v.secs} s` : `${repsText(v.reps, v.repsTo)}${v.measure === 'breaths' ? ' breaths' : ''}`}`;
   if (v.pct != null) t += ` · ${v.pct}%`;

@@ -253,12 +253,20 @@ export const offInWeek = (item, week) => Boolean(item.byWeek?.[week]?.off);
 export const exerciseInWeek = (item, week) => item.byWeek?.[week]?.exerciseId || item.exerciseId;
 
 // The items a day has in one week, each with that week's exercise.
+// Words and targets a coach can give one week of its own (item.byWeek[w]).
+export const TEXT_WEEK_KEYS = ['note', 'tempo', 'rpe'];
+
 export function weekItems(block, dayIndex, week) {
   const day = block.days[dayIndex];
   if (!day) return [];
   return day.items.filter((it) => !offInWeek(it, week)).map((it) => {
     const exId = exerciseInWeek(it, week);
-    return exId === it.exerciseId ? it : { ...it, exerciseId: exId };
+    const own = TEXT_WEEK_KEYS.filter((k) => it.byWeek?.[week]?.[k] != null);
+    if (exId === it.exerciseId && !own.length) return it;
+    const out = { ...it, exerciseId: exId };
+    // A week's own note, tempo or target RPE ('' = none that week).
+    for (const k of own) { const v = it.byWeek[week][k]; if (v === '') delete out[k]; else out[k] = v; }
+    return out;
   });
 }
 
