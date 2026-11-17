@@ -5,6 +5,7 @@ import { toISO, addDays, weekStart, sessionTotals, addTotals, emptyTotals, build
 import { weekSummary, loadTrend } from './summary.js';
 import { esc, fmt, fmtDate, progTag, bindActions, sheet, closeSheet, ask, toast, stat, bars, linkify, demoAttrs, PATTERN_LABEL } from './ui.js';
 import { timerSheet } from './timer.js';
+import { editTarget, editView, editActions } from './coachedit.js';
 import { videosEnabled, videoFresh, uploadVideo, videoUrl, removeVideos, VIDEO_MAX_SECS, VIDEO_MAX_MB, VIDEO_DAYS } from './sync.js';
 
 const today = () => toISO(new Date());
@@ -112,12 +113,12 @@ export function sessionHref(log, cat = log.category) {
   return `#/athlete/${log.athleteId}/session/${log.date}${cat && cat !== 'strength' ? `?c=${cat}` : ''}`;
 }
 
-function workoutCard(id, iso, title, sub, entries, log, pill = '', cat = 'strength') {
+function workoutCard(id, iso, title, sub, entries, log, pill = '', cat = 'strength', coach = false) {
   const st = statusOf(log);
   const ex = store.exercisesById();
   const shown = entries.slice(0, 4);
   const more = entries.length - shown.length;
-  const go = { done: 'View workout', live: 'Continue workout' }[st.cls] || 'Start workout';
+  const go = st.cls === 'done' ? 'View workout' : coach ? 'Open and edit' : st.cls === 'live' ? 'Continue workout' : 'Start workout';
   return `<a class="workout-card ${st.cls}" href="${sessionHref({ athleteId: id, date: iso }, cat)}">
     <div class="wc-top">${sub}${st.cls ? `<span class="status ${st.cls}">${st.txt}</span>` : pill}</div>
     <h2>${esc(title)}</h2>
@@ -158,11 +159,11 @@ export function dayCards(id, iso, { peek = false } = {}) {
     let card;
     if (log) {
       const prog = store.logProgram(log);
-      card = workoutCard(id, iso, log.name, prog ? progTag(prog.name, prog.color, log.week) : '<span class="kicker">Workout</span>', log.entries, log, '', cat);
+      card = workoutCard(id, iso, log.name, prog ? progTag(prog.name, prog.color, log.week) : '<span class="kicker">Workout</span>', log.entries, log, '', cat, look && !peek);
     } else {
       const p = plans[0];
       card = workoutCard(id, iso, p.block.days[p.dayIndex].name, progTag(p.block.name, store.programColor(p.assignment), p.week), store.previewEntries(id, iso, p), null,
-        p.block.deloadWeek === p.week ? '<span class="status">Deload</span>' : '', cat);
+        p.block.deloadWeek === p.week ? '<span class="status">Deload</span>' : '', cat, look && !peek);
     }
     const shownId = log ? log.assignmentId : plans[0]?.assignment.id;
     const alt = (!log || untouchedLog(log)) ? plans.filter((p) => p.assignment.id !== shownId) : [];
@@ -193,7 +194,7 @@ export function today_(root, { id }, query) {
   root.innerHTML = `
     <header class="page-head">${coachBack(id)}<span class="kicker">${fmtDate(iso, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
       <h1>Hey ${esc(athlete.name.split(' ')[0])}</h1></header>
-    ${isCoach(id) ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything.</p>` : ''}
+    ${isCoach(id) ? `<p class="coach-peek"><b>Coach preview</b> This is what ${esc(athlete.name.split(' ')[0])} sees. Looking doesn't change anything. Open a workout to change it: edits save to ${esc(athlete.name.split(' ')[0])}'s program.</p>` : ''}
     ${dateStrip(id, iso)}
     ${html}
     ${last ? `<p class="last-line"><span>Last session</span><a href="${sessionHref(last)}">${fmtDate(last.date, { weekday: 'short' })} · ${esc(last.name)}</a></p>` : ''}`;
@@ -318,18 +319,30 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
   const block = store.get('blocks', log.blockId);
   const labels = orderLabels(log.entries);
 
+  // A coach can switch between editing the day (it saves to the athlete's
+  // program) and seeing it exactly as the athlete does. Editing is the default.
+  const canEdit = isCoach(id) && Boolean(editTarget(log));
+  const modeSwitch = canEdit ? `<div class="seg ce-mode" role="group" aria-label="Coach view"><button class="${coachView.edit ? 'on' : ''}" data-action="ceMode" data-v="edit" aria-pressed="${coachView.edit}">Edit</button><button class="${coachView.edit ? '' : 'on'}" data-action="ceMode" data-v="view" aria-pressed="${!coachView.edit}">Athlete's view</button></div>` : '';
+  const ceMode = (el) => { coachView.edit = el.dataset.v === 'edit'; session(root, { id, date, warm }, query); };
+  if (canEdit && coachView.edit) {
+    root.innerHTML = editView(log, { warm, toggle: modeSwitch, backTo: `#/coach/athlete/${id}`, backLabel: athlete.name });
+    const redraw = () => { const y = window.scrollY; session(root, { id, date, warm }, query); window.scrollTo(0, y); };
+    bindActions(root, { ...editActions(log, { warm, redraw }), ceMode });
+    return;
+  }
+
   const folds = foldState(log);
   const counts = () => log.entries.reduce((a, e) => [a[0] + e.sets.filter((x) => x.done).length, a[1] + e.sets.length], [0, 0]);
   const [nDone, nAll] = counts();
   const backTo = isCoach(id) ? `#/coach/athlete/${id}` : `#/athlete/${id}?d=${date}`;
   root.innerHTML = `
     <div class="session-bar">
-      <div class="sb-row"><a class="back" href="${backTo}">${isCoach(id) ? esc(athlete.name) : fmtDate(date)}</a>${warm ? '' : '<button class="chip" data-action="switch">Switch day</button>'}</div>
+      <div class="sb-row"><a class="back" href="${backTo}">${isCoach(id) ? esc(athlete.name) : fmtDate(date)}</a>${modeSwitch || (warm ? '' : '<button class="chip" data-action="switch">Switch day</button>')}</div>
       <div class="sb-row"><span class="sb-title">${esc(warm ? 'Warmup' : log.name)}</span><span class="sb-count" id="sb-count"><b>${nDone}</b> of ${nAll} sets</span></div>
       <div class="progress"><i id="sb-bar" style="width:${nAll ? (nDone / nAll) * 100 : 0}%"></i></div>
     </div>
     <p class="kicker">${warm ? 'Before your workout' : block ? (() => { const pg = store.logProgram(log); return progTag(pg.name, pg.color, log.week); })() : ''}${log.finished ? ' · <b class="warn-text" style="color:var(--turf)">Finished</b>' : ''}</p>
-    ${!warm && isCoach(id) && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
+    ${!warm && !canEdit && isCoach(id) && log.assignmentId && store.get('assignments', log.assignmentId) && block ? `<a class="btn ghost coach-change" href="#/coach/assignment/${log.assignmentId}/plan?w=${log.week}&day=${log.dayIndex}">Change ${esc(athlete.name.split(' ')[0])}'s program</a>` : ''}
     <div style="height:10px"></div>
     ${sectioned(log.entries, warm ? (e, i) => entryCard(log, e, i, labels[i], folds[i]) : (e, i) => {
       // Headings split the warmup from the main work when there is a warmup.
@@ -393,6 +406,7 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
   const allDone = () => log.entries.some((e) => e.sets.length) && log.entries.every((e) => e.sets.every((x) => x.done));
 
   bindActions(root, {
+    ceMode,
     toggleSet: (el) => {
       const s = log.entries[el.dataset.i].sets[el.dataset.j];
       s.done = !s.done;
@@ -563,6 +577,8 @@ export function session(root, { id, date, warm = false }, query = new URLSearchP
 // Finishing an exercise moves the open one along (foldFocus), even past an
 // exercise the athlete skipped.
 const foldTaps = new Map();
+// A coach's choice on the workout page: edit the day, or see it as the athlete does.
+const coachView = { edit: true };
 const foldFocus = new Map();
 const foldOverrides = (log) => { if (!foldTaps.has(log.id)) foldTaps.set(log.id, {}); return foldTaps.get(log.id); };
 function foldState(log) {
