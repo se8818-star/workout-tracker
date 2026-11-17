@@ -32,31 +32,65 @@ async function loadLogins() {
   return changed;
 }
 
+// A phone that was signed in to a team last time opens straight onto its
+// saved copy, and checks with the server in the background, so a weak gym
+// signal never leaves anyone looking at "Loading…". supabase-js keeps the
+// sign-in under this key.
+const SESSION_KEY = `sb-${(() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch { return ''; } })()}-auth-token`;
+const hasSavedSession = () => { try { return Boolean(localStorage.getItem(SESSION_KEY)); } catch { return false; } };
+let booted = null; // settles once the server check is done (or failed)
+
+// Something that needs the server, tapped in the first moments after opening.
+function need() { if (!sb) throw new Error('Still connecting. Try again in a moment.'); }
+
 export async function startSync(render) {
   rerender = render;
   if (!cloudEnabled) return;
+  const s = store.settings();
+  const early = Boolean(s.membership && s.me && hasSavedSession());
+  if (early) {
+    membership = s.membership;
+    user = { id: s.me.userId || null, email: '' }; // stands in until the real sign-in is read
+    ready = true;
+    rerender();
+  }
+  booted = boot(early);
+  await booted;
+}
+
+async function boot(early) {
   try {
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
-    sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true } });
+    sb ||= createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true } });
     const { data } = await sb.auth.getSession();
     user = data.session?.user || null;
   } catch (e) {
-    // First visit with no connection: nothing cached yet to sign in with.
     console.warn(e);
+    // Opened already from the saved copy: keep working on it, and try the
+    // server again once there's signal.
+    if (early) { window.addEventListener('online', () => { booted = boot(true); }, { once: true }); return; }
+    // First visit with no connection: nothing saved yet to sign in with.
     loadError = true; ready = true; rerender();
     return;
   }
   sb.auth.onAuthStateChange((_e, session) => { user = session?.user || null; });
-  if (user) await loadMembership();
+  const before = JSON.stringify(membership);
+  if (user) await loadMembership(); else membership = null;
   ready = true;
-  rerender();
+  // Redraw only if something changed (signed out, removed from the team), so
+  // a page the athlete is already typing on isn't redrawn under them.
+  if (!early || !user || JSON.stringify(membership) !== before) rerender();
   if (membership) {
+    // Once, after updating: read everything again to learn each record's version.
+    if (!store.settings().versionsReady) store.setSetting('lastPull', null);
     await syncNow();
     store.onChange(schedulePush);
     setInterval(syncNow, 30000);
     if (membership.role === 'coach') sweepVideos().catch((e) => console.warn(e));
     window.addEventListener('online', syncNow);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+    // Leaving the app: upload now rather than after the usual short wait, which
+    // a phone may never give a page in the background.
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(pushTimer); push().catch(() => {}); } else syncNow(); });
   }
 }
 
@@ -123,6 +157,7 @@ async function loadAccess() {
 
 // Head coach: which athletes `coachAthleteId` may coach ([] takes it away).
 export async function setCoachAccess(coachAthleteId, athleteIds) {
+  need();
   const ids = [...new Set(athleteIds)].filter((x) => x !== coachAthleteId);
   const q = sb.from('coach_access');
   const { error } = ids.length
@@ -139,7 +174,7 @@ function schedulePush() {
 }
 
 export async function syncNow() {
-  if (!membership || !navigator.onLine) return;
+  if (!sb || !membership || !navigator.onLine) return;
   const accessChanged = await loadAccess();
   await push();
   await pull();
@@ -154,16 +189,56 @@ async function push() {
   return pushing;
 }
 
+// Uploads go through save_records (supabase/schema.sql), which saves a row
+// only if the server still has the version this device's copy was built on.
+// If another device got there first, the two copies are merged here
+// (store.resolveConflict) and sent again. Until the SQL has been run the
+// plain upload is used, where the last upload wins.
+let rpcMissing = false;
+const CHUNK = 200;
+
 async function pushDirty() {
-  if (!membership || !navigator.onLine) return;
-  const dirty = store.dirtyKeys();
+  if (!sb || !membership || !navigator.onLine) return;
+  for (let round = 0; round < 3; round++) {
+    const dirty = store.dirtyKeys();
+    if (!dirty.length) return;
+    if (rpcMissing) return plainPush(dirty);
+    let merged = false, local = false;
+    const refused = [];
+    for (let at = 0; at < dirty.length; at += CHUNK) {
+      const part = dirty.slice(at, at + CHUNK);
+      const rows = part.map(([key, mark]) => store.uploadRow(key, mark, membership.team_id));
+      const { data, error } = await sb.rpc('save_records', { items: rows });
+      if (error) {
+        if (error.code === 'PGRST202' || /save_records/.test(error.message || '')) { rpcMissing = true; return plainPush(store.dirtyKeys()); }
+        console.warn(error);
+        return; // e.g. lost signal: everything stays queued
+      }
+      (Array.isArray(data) ? data : []).forEach((res, n) => {
+        const [key, mark] = part[n];
+        if (res.status === 'saved') {
+          if (store.uploaded(key, mark, rows[n], res)) local = true;
+        } else if (res.status === 'conflict') {
+          // Merged with the other device's copy: shown now, and sent again if needed.
+          if (store.resolveConflict(key, mark, res) === 'retry') merged = true;
+          local = true;
+        } else {
+          store.clearDirty([[key, mark]]);
+          refused.push(rows[n]);
+        }
+      });
+    }
+    store.flush();
+    if (refused.length) await putBack(refused);
+    if (local) redraw();
+    if (!merged) return;
+  }
+}
+
+// The plain upload: each row replaces whatever the server has.
+async function plainPush(dirty) {
   if (!dirty.length) return;
-  const rows = dirty.map(([key, mark]) => {
-    const [kind, id] = key.split('/');
-    const rec = store.get(kind, id);
-    const deleted = store.isDeleted(mark) || !rec;
-    return { team_id: membership.team_id, kind, id, data: rec || mark?.data || {}, deleted };
-  });
+  const rows = dirty.map(([key, mark]) => { const r = store.uploadRow(key, mark, membership.team_id); delete r.base; return r; });
   const { error } = await sb.from('records').upsert(rows);
   if (!error) { store.clearDirty(dirty); return; }
   // One bad row (e.g. an athlete editing something only a coach may) fails the
@@ -175,37 +250,47 @@ async function pushDirty() {
     if (r.error?.code === '42501') refused.push(rows[i]);
   }
   store.clearDirty(done);
-  // Put refused changes back the way the server has them, so this device
-  // doesn't keep showing a change nobody else will ever see.
-  if (!refused.length) return;
+  if (refused.length) await putBack(refused);
+}
+
+// Put refused changes back the way the server has them, so this device
+// doesn't keep showing a change nobody else will ever see.
+async function putBack(refused) {
   for (const row of refused) {
-    const { data } = await sb.from('records').select('data, deleted').eq('team_id', row.team_id).eq('kind', row.kind).eq('id', row.id).maybeSingle();
-    store.applyRemote(row.kind, row.id, data && !data.deleted ? data.data : null);
+    const { data } = await sb.from('records').select('data, deleted, updated_at').eq('team_id', row.team_id).eq('kind', row.kind).eq('id', row.id).maybeSingle();
+    store.applyRemote(row.kind, row.id, data && !data.deleted ? data.data : null, data?.updated_at);
   }
   store.flush();
   toast(refused.some((r) => r.kind === 'blocks' || r.kind === 'exercises') ? 'Only the head coach can change that. It was put back.' : 'That change wasn\'t allowed, so it was put back.');
   rerender();
 }
 
+// Don't redraw under someone who is typing; the next change will catch up.
+function redraw() {
+  if (!document.activeElement?.matches?.('input, textarea, select')) rerender();
+}
+
 async function pull() {
   const last = store.settings().lastPull || '1970-01-01T00:00:00Z';
   // Re-read a 2-minute overlap so a write that committed late isn't skipped.
   const since = new Date(new Date(last).getTime() - 120000).toISOString();
+  const full = !store.settings().lastPull;
   let changed = false, newest = last;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb.from('records').select('kind, id, data, deleted, updated_at')
       .eq('team_id', membership.team_id).gt('updated_at', since).order('updated_at').range(from, from + 999);
     if (error) { console.warn(error); return; }
     for (const r of data) {
-      if (store.applyRemote(r.kind, r.id, r.deleted ? null : r.data)) changed = true;
+      if (store.applyRemote(r.kind, r.id, r.deleted ? null : r.data, r.updated_at)) changed = true;
       if (r.updated_at > newest) newest = r.updated_at;
     }
     if (data.length < 1000) break;
   }
   if (newest !== last) store.setSetting('lastPull', newest);
-  // Don't redraw under someone who is typing; the next pull will catch up.
-  const typing = document.activeElement?.matches?.('input, textarea, select');
-  if (changed && !typing) rerender();
+  // Every record has been read once with its version: uploads can now ask
+  // the server to check them.
+  if (full && !store.settings().versionsReady) store.setSetting('versionsReady', true); else store.flush();
+  if (changed) redraw();
 }
 
 // Renders the sign-in or team screen when needed. Returns true if it took over the page.
@@ -410,7 +495,8 @@ function teamView(root) {
 
 // Coach only. Cuts the athlete's login off from the team (no-op in demo mode).
 export async function removeAthleteLogin(athleteId) {
-  if (!sb || !membership) return;
+  if (!cloudEnabled || !membership) return;
+  need();
   const { error } = await sb.rpc('remove_athlete', { t: membership.team_id, aid: athleteId });
   if (error) throw error;
 }
@@ -436,6 +522,7 @@ export async function uploadVideo(athleteId, file) {
 }
 
 export async function videoUrl(path) {
+  need();
   const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
@@ -468,13 +555,16 @@ async function sweepVideos() {
 
 // Set or change the signed-in account's password (More page).
 export async function setPassword(password) {
-  if (!sb) return;
+  if (!cloudEnabled) return;
+  need();
   const { error } = await sb.auth.updateUser({ password });
   if (error) throw error;
 }
 
 // Signing out erases this device's copy, so upload anything still waiting first.
 export async function signout() {
+  // Just opened: let the server check finish first (it holds the sign-in).
+  if (booted) await Promise.race([booted, new Promise((r) => setTimeout(r, 5000))]);
   if (membership && navigator.onLine) await push().catch((e) => console.warn(e));
   const waiting = store.dirtyKeys().length;
   if (waiting && !await ask(`${waiting} change${waiting > 1 ? 's' : ''} on this phone (like logged sets) haven't reached the server yet${navigator.onLine ? '' : ' because there\'s no connection'}. Signing out now deletes them. Wait until you have signal and try again.`, { title: 'Not uploaded yet', ok: 'Sign out anyway', cancel: 'Stay signed in', danger: true })) return;

@@ -11,3 +11,4 @@ bun.lock*
 README.md
 supabase
 tests
+.github
